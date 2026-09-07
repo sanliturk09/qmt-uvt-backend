@@ -330,6 +330,7 @@ def sync_jobs_from_sap(current_user: dict = Depends(require_role(["ADMIN", "PLAN
     view_name = f"dbo.vw_SAP_ReleasedOperations_{factory}"
 
     with get_db_cursor() as cur:
+        # 1. Sipariş Başlıklarını Al
         cur.execute(f"""
             INSERT INTO dbo.ProductionOrders 
                 (sap_factory, sap_doc_entry, sap_doc_num, item_code, item_description, planned_qty, status, plan_start_date, plan_due_date)
@@ -343,31 +344,48 @@ def sync_jobs_from_sap(current_user: dict = Depends(require_role(["ADMIN", "PLAN
         """)
         synced_orders_count = cur.rowcount
 
+        # 2. Operasyonları sap_line_num Sırasına Göre (1, 2, 3, 4, 5...) ve MK-TMZ -> TMZ Eşleşmesiyle Al
         cur.execute(f"""
+            WITH RankedOps AS (
+                SELECT 
+                    v.sap_doc_entry,
+                    v.sap_line_num,
+                    v.stage_id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY v.sap_doc_entry 
+                        ORDER BY v.sap_line_num ASC
+                    ) AS calculated_stage_order,
+                    v.resource_code,
+                    v.category_name,
+                    v.planned_qty,
+                    v.planned_duration_min
+                FROM {view_name} v
+            )
             INSERT INTO dbo.ProductionOperations
                 (sap_doc_entry, sap_line_num, stage_id, stage_order, resource_code, category_name, category_id, status, is_unlocked, planned_qty, completed_qty, scrapped_qty, planned_duration_min)
             SELECT 
-                v.sap_doc_entry,
-                v.sap_line_num,
-                v.stage_id,
-                v.stage_order,
-                v.resource_code,
-                v.category_name,
+                r.sap_doc_entry,
+                r.sap_line_num,
+                r.stage_id,
+                r.calculated_stage_order AS stage_order,
+                r.resource_code,
+                r.category_name,
                 sc.id AS category_id,
-                CASE WHEN v.stage_order = 1 THEN 'PENDING' ELSE 'LOCKED' END AS status,
-                CASE WHEN v.stage_order = 1 THEN 1 ELSE 0 END AS is_unlocked,
-                v.planned_qty,
+                CASE WHEN r.calculated_stage_order = 1 THEN 'PENDING' ELSE 'LOCKED' END AS status,
+                CASE WHEN r.calculated_stage_order = 1 THEN 1 ELSE 0 END AS is_unlocked,
+                r.planned_qty,
                 0.0,
                 0.0,
-                ISNULL(v.planned_duration_min, 0.0)
-            FROM {view_name} v
+                ISNULL(r.planned_duration_min, 0.0)
+            FROM RankedOps r
             LEFT JOIN dbo.StationCategories sc ON 
-                v.category_name COLLATE Latin1_General_CI_AI LIKE '%' + sc.code + '%' 
-                OR sc.category_name COLLATE Latin1_General_CI_AI LIKE '%' + v.category_name + '%'
-                OR v.category_name COLLATE Latin1_General_CI_AI LIKE '%' + sc.category_name + '%'
+                r.resource_code COLLATE Latin1_General_CI_AI LIKE '%' + sc.code + '%'
+                OR r.category_name COLLATE Latin1_General_CI_AI LIKE '%' + sc.code + '%' 
+                OR sc.category_name COLLATE Latin1_General_CI_AI LIKE '%' + r.category_name + '%'
+                OR r.category_name COLLATE Latin1_General_CI_AI LIKE '%' + sc.category_name + '%'
             WHERE NOT EXISTS (
                 SELECT 1 FROM dbo.ProductionOperations op 
-                WHERE op.sap_doc_entry = v.sap_doc_entry AND op.sap_line_num = v.sap_line_num
+                WHERE op.sap_doc_entry = r.sap_doc_entry AND op.sap_line_num = r.sap_line_num
             )
         """)
         synced_ops_count = cur.rowcount
