@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QMT - Üretim & Planlama Kokpiti</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
+        body { background-color: #0b1120; color: #f8fafc; min-height: 100vh; display: flex; flex-direction: column; padding: 16px 24px; overflow-x: hidden; }
+        .header-bar { display: flex; justify-content: space-between; align-items: center; background-color: #1e293b; padding: 14px 24px; border-radius: 14px; border: 1px solid #334155; margin-bottom: 20px; }
+        .header-left { display: flex; align-items: center; gap: 16px; }
+        .header-logo { max-height: 40px; object-fit: contain; }
+        .header-title { font-size: 1.35rem; font-weight: 800; color: #38bdf8; letter-spacing: 0.5px; }
+        .header-right { display: flex; align-items: center; gap: 12px; }
+        .btn-sync { background: linear-gradient(135deg, #0284c7, #0369a1); color: #ffffff; border: none; padding: 10px 18px; font-size: 0.9rem; font-weight: 700; border-radius: 10px; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3); }
+        .btn-shipping { background: linear-gradient(135deg, #059669, #10b981); color: #ffffff; border: none; padding: 10px 18px; font-size: 0.9rem; font-weight: 700; border-radius: 10px; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3); }
+        .btn-logout { background-color: #334155; color: #f1f5f9; border: none; padding: 10px 16px; font-size: 0.9rem; font-weight: 600; border-radius: 10px; cursor: pointer; }
+        .section-title { font-size: 1.1rem; font-weight: 700; color: #cbd5e1; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+
+        /* Saha Monitörü */
+        .stations-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 24px; }
+        .station-card { background-color: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 14px; cursor: pointer; transition: transform 0.15s, border-color 0.2s; }
+        .station-card:hover { transform: translateY(-2px); border-color: #38bdf8; }
+        .station-card.status-IDLE { border-color: #334155; }
+        .station-card.status-RUNNING { border-color: #10b981; }
+        .station-card.status-PAUSED { border-color: #f59e0b; }
+        .station-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .station-name { font-size: 0.9rem; font-weight: 700; color: #f8fafc; }
+        .status-pill { font-size: 0.7rem; font-weight: 800; padding: 3px 8px; border-radius: 6px; }
+        .pill-idle { background-color: #334155; color: #94a3b8; }
+        .pill-running { background-color: #065f46; color: #34d399; }
+        .pill-paused { background-color: #78350f; color: #fbbf24; }
+
+        /* Sekmeler */
+        .station-tabs { display: flex; gap: 8px; overflow-x: auto; margin-bottom: 14px; padding-bottom: 4px; }
+        .station-tab-btn { background-color: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 8px 16px; border-radius: 8px; font-size: 0.85rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
+        .station-tab-btn.active { background-color: #0284c7; color: #ffffff; border-color: #38bdf8; }
+
+        /* Takvim */
+        .calendar-section { background-color: #1e293b; border-radius: 14px; border: 1px solid #334155; padding: 18px; margin-bottom: 24px; }
+        .week-nav-bar { display: flex; justify-content: space-between; align-items: center; background-color: #0f172a; padding: 10px 16px; border-radius: 10px; border: 1px solid #334155; margin-bottom: 14px; }
+        .week-nav-btn { background-color: #1e293b; color: #cbd5e1; border: 1px solid #475569; padding: 6px 14px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; cursor: pointer; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; overflow-x: auto; }
+        .cal-column { background-color: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 10px; min-height: 400px; display: flex; flex-direction: column; gap: 8px; }
+        .cal-column-header { font-size: 0.85rem; font-weight: 700; color: #38bdf8; border-bottom: 1px solid #334155; padding-bottom: 6px; text-align: center; }
+
+        /* Tezgâh / Masa Kulvarı (Swimlane) */
+        .workstation-lane { background-color: #162032; border: 1px dashed #334155; border-radius: 8px; padding: 8px; min-height: 120px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; transition: background 0.2s, border-color 0.2s; }
+        .workstation-lane.drag-over { background-color: #1e3a5f; border-color: #38bdf8; }
+        .lane-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; font-weight: 700; color: #94a3b8; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; }
+
+        .capacity-bar-container { background-color: #334155; height: 5px; border-radius: 3px; overflow: hidden; margin-top: 3px; }
+        .capacity-bar-fill { height: 100%; width: 0%; background-color: #10b981; transition: width 0.3s; }
+        .capacity-bar-fill.danger { background-color: #ef4444; }
+
+        /* İş Kartı */
+        .cal-job-card { background-color: #1e293b; border: 1px solid #475569; border-left: 4px solid #38bdf8; border-radius: 6px; padding: 6px 8px; font-size: 0.75rem; cursor: grab; }
+        .cal-job-card.dragging { opacity: 0.4; }
+        .cal-job-doc { font-weight: 700; color: #ffffff; }
+
+        /* Havuz */
+        .pool-section { background-color: #1e293b; border-radius: 14px; border: 1px solid #334155; padding: 18px; margin-bottom: 24px; }
+        .pool-cards-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-top: 12px; max-height: 260px; overflow-y: auto; }
+        .pool-card { background-color: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px; cursor: grab; }
+
+        /* Drawer */
+        .drawer-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0, 0, 0, 0.75); display: none; justify-content: flex-end; z-index: 2000; }
+        .drawer-box { background-color: #1e293b; width: 100%; max-width: 520px; height: 100%; border-left: 2px solid #38bdf8; padding: 20px; display: flex; flex-direction: column; }
+        .drawer-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 12px; margin-bottom: 14px; }
+        .drawer-content { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .drawer-item { background-color: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 0.82rem; }
+        .drawer-item.blocked { border-color: #ef4444; }
+        .drawer-badge-ready { background-color: #065f46; color: #34d399; font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; }
+        .drawer-badge-blocked { background-color: #7f1d1d; color: #fca5a5; font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; }
+
+        /* Sevkiyat Modalı */
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(4px); display: none; justify-content: center; align-items: center; z-index: 2500; padding: 20px; }
+        .shipping-modal-box { background-color: #1e293b; border-radius: 16px; border: 2px solid #10b981; width: 100%; max-width: 850px; max-height: 85vh; display: flex; flex-direction: column; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.7); }
+    </style>
+</head>
+<body>
+
+    <div class="header-bar">
+        <div class="header-left">
+            <img src="/static/images/QMT_LOGO.png" alt="QMT" class="header-logo" onerror="this.style.display='none'">
+            <div class="header-title">ÜRETİM YÖNETİM & PLANLAMA KOKPİTİ</div>
+        </div>
+        <div class="header-right">
+            <button class="btn-shipping" onclick="openShippingModal()"><span>📦</span> Sevkiyat / Depo</button>
+            <button class="btn-sync" onclick="syncFromSAP()" id="btnSync"><span>🔄</span> SAP'den İşleri Çek</button>
+            <button class="btn-logout" onclick="logout()">Çıkış Yap</button>
+        </div>
+    </div>
+
+    <div class="section-title">
+        <span>Canlı Saha ve İstasyon Durumu</span>
+        <span style="font-size: 0.8rem; color: #64748b;">Canlı Monitör</span>
+    </div>
+    <div class="stations-grid" id="stationsContainer"></div>
+
+    <div class="station-tabs" id="stationTabs">
+        <button class="station-tab-btn active" onclick="selectStationCategory(null, this)">Tüm İstasyonlar</button>
+    </div>
+
+    <div class="calendar-section">
+        <div class="section-title">
+            <span id="calendarTitle">Haftalık Tezgâh / Masa Çizelgelemesi</span>
+            <span style="font-size: 0.8rem; color: #38bdf8;" id="calendarSubHeader">Lütfen bir istasyon seçin</span>
+        </div>
+
+        <div class="week-nav-bar" id="weekNavBar" style="display: none;">
+            <button class="week-nav-btn" onclick="navigateWeek(-7)">◀ Önceki Hafta</button>
+            <div style="font-weight:700; color:#38bdf8;" id="weekRangeLabel">Yükleniyor...</div>
+            <div style="display:flex; gap:6px;">
+                <button class="week-nav-btn" onclick="resetToCurrentWeek()">Bu Hafta</button>
+                <button class="week-nav-btn" onclick="navigateWeek(7)">Sonraki Hafta ▶</button>
+            </div>
+        </div>
+
+        <div class="calendar-grid" id="calendarGrid"></div>
+    </div>
+
+    <div class="pool-section">
+        <div class="section-title">
+            <span>Masa Ataması Bekleyen Açık Siparişler <small style="color:#64748b; font-weight:normal;">(Kartı tutup ilgili günün masasına sürükleyin)</small></span>
+            <span style="font-size: 0.8rem; color: #94a3b8;" id="poolCountBadge">0 Sipariş</span>
+        </div>
+        <div class="pool-cards-container" id="poolContainer"></div>
+    </div>
+
+    <div class="drawer-overlay" id="drawerOverlay" onclick="if(event.target.id==='drawerOverlay') closeDrawerDirect()">
+        <div class="drawer-box">
+            <div class="drawer-header">
+                <div style="font-size:1.1rem; font-weight:800; color:#38bdf8;" id="drawerStationTitle">İstasyon Yükü</div>
+                <button style="background:none; border:none; color:#94a3b8; font-size:1.4rem; cursor:pointer;" onclick="closeDrawerDirect()">&times;</button>
+            </div>
+            <div class="drawer-content" id="drawerContent"></div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="shippingModal" onclick="if(event.target.id==='shippingModal') closeShippingModal()">
+        <div class="shipping-modal-box">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #334155; padding-bottom:14px; margin-bottom:16px;">
+                <div>
+                    <div style="font-size:1.3rem; font-weight:800; color:#10b981;">📦 SEVKİYAT / DEPO - BİTEN SİPARİŞLER</div>
+                    <div style="font-size:0.8rem; color:#94a3b8; margin-top:2px;">Tüm operasyonları tamamlanan ürünler burada toplanır. Seçerek kalıcı olarak tamamlayabilirsiniz.</div>
+                </div>
+                <button onclick="closeShippingModal()" style="background:none; border:none; color:#94a3b8; font-size:1.6rem; cursor:pointer;">&times;</button>
+            </div>
+
+            <div style="display:flex; gap:12px; margin-bottom:14px;">
+                <input type="text" id="shippingSearchInput" onkeyup="filterShippingList()" placeholder="🔍 Parça Kodu veya Sipariş No (#160, 2853...) ile ara..." style="flex:1; background-color:#0f172a; border:1px solid #334155; border-radius:8px; padding:10px 14px; color:#fff; font-size:0.9rem; outline:none;">
+                <button onclick="toggleSelectAllShipping(this)" style="background-color:#334155; color:#cbd5e1; border:none; padding:0 16px; border-radius:8px; font-size:0.85rem; font-weight:700; cursor:pointer;">Tümünü Seç</button>
+            </div>
+
+            <div style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:4px;" id="shippingListContainer"></div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #334155; padding-top:16px; margin-top:16px;">
+                <span style="font-size:0.85rem; color:#94a3b8;" id="shippingSelectedCountLabel">0 sipariş seçildi</span>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="closeShippingModal()" style="background-color:#334155; color:#fff; border:none; padding:10px 18px; border-radius:8px; font-weight:600; cursor:pointer;">Vazgeç</button>
+                    <button onclick="submitCloseOrders()" id="btnSubmitClose" style="background:linear-gradient(135deg, #10b981, #059669); color:#fff; border:none; padding:10px 22px; border-radius:8px; font-weight:800; cursor:pointer;">Seçilenleri Tamamla ve Arşivle</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem('uvt_token');
+        if (!token) window.location.href = '/';
+
+        let cachedAllOps = [];
+        let cachedStations = [];
+        let cachedWorkstations = [];
+        let currentSelectedCatId = null;
+        let draggedOpId = null;
+        let rawShippingOrders = [];
+
+        function getMonday(d) {
+            d = new Date(d);
+            const day = d.getDay();
+            const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+            return new Date(d.setDate(diff));
+        }
+
+        let currentViewMonday = getMonday(new Date());
+
+        async function navigateWeek(days) {
+            currentViewMonday.setDate(currentViewMonday.getDate() + days);
+            await renderCalendar();
+        }
+
+        async function resetToCurrentWeek() {
+            currentViewMonday = getMonday(new Date());
+            await renderCalendar();
+        }
+
+        // Saha Telemetrisi
+        async function loadStationTelemetry() {
+            try {
+                const res = await fetch('/api/cockpit/station-status', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (res.status === 401 || res.status === 403) logout();
+                cachedStations = await res.json();
+                renderStations(cachedStations);
+                renderTabs(cachedStations);
+            } catch (err) { console.error(err); }
+        }
+
+        function renderStations(stations) {
+            const container = document.getElementById('stationsContainer');
+            container.innerHTML = '';
+            stations.forEach(st => {
+                const card = document.createElement('div');
+                card.className = `station-card status-${st.status}`;
+                card.onclick = () => openStationDrawer(st.category_id, `${st.station_code} - ${st.station_name}`);
+
+                let statusBadge = '<span class="status-pill pill-idle">BOŞTA</span>';
+                if (st.status === 'RUNNING') statusBadge = '<span class="status-pill pill-running">ÇALIŞIYOR</span>';
+                if (st.status === 'PAUSED') statusBadge = '<span class="status-pill pill-paused">DURUŞTA</span>';
+
+                let bodyHtml = `<div style="font-size:0.75rem; color:#94a3b8; margin-top:4px;">Aktif iş yok. (Tıkla ve işleri gör)</div>`;
+                if (st.status !== 'IDLE') {
+                    bodyHtml = `
+                        <div style="font-size:0.75rem; color:#cbd5e1; margin-top:4px;">
+                            <strong>#${st.sap_doc_num}</strong> - ${st.item_code}
+                            ${st.pause_reason ? `<div style="color:#fbbf24; font-weight:700;">${st.pause_reason}</div>` : ''}
+                        </div>
+                    `;
+                }
+
+                card.innerHTML = `
+                    <div class="station-header">
+                        <div class="station-name">${st.station_code} - ${st.station_name}</div>
+                        ${statusBadge}
+                    </div>
+                    ${bodyHtml}
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function renderTabs(stations) {
+            const tabs = document.getElementById('stationTabs');
+            if (tabs.children.length > 1) return;
+            stations.forEach(st => {
+                const btn = document.createElement('button');
+                btn.className = 'station-tab-btn';
+                btn.innerText = st.station_code;
+                btn.title = st.station_name;
+                btn.onclick = () => selectStationCategory(st.category_id, btn);
+                tabs.appendChild(btn);
+            });
+        }
+
+        async function selectStationCategory(catId, btnEl) {
+            currentSelectedCatId = catId;
+            document.querySelectorAll('.station-tab-btn').forEach(b => b.classList.remove('active'));
+            btnEl.classList.add('active');
+
+            const st = cachedStations.find(s => s.category_id === catId);
+            if (st) {
+                document.getElementById('calendarTitle').innerText = `${st.station_name} (${st.station_code}) Tezgâh Çizelgelemesi`;
+                document.getElementById('calendarSubHeader').innerText = 'Tezgâh Kapasitesi: 510 dk / Gün';
+                document.getElementById('weekNavBar').style.display = 'flex';
+            } else {
+                document.getElementById('calendarTitle').innerText = 'Haftalık Tezgâh / Masa Çizelgelemesi';
+                document.getElementById('calendarSubHeader').innerText = 'Lütfen bir istasyon seçin';
+                document.getElementById('weekNavBar').style.display = 'none';
+            }
+
+            await loadWorkstations();
+            await renderCalendar();
+            renderPool();
+        }
+
+        async function loadWorkstations() {
+            try {
+                let url = '/api/cockpit/workstations';
+                if (currentSelectedCatId) url += `?category_id=${currentSelectedCatId}`;
+                const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                cachedWorkstations = await res.json();
+            } catch (e) { console.error(e); }
+        }
+
+        async function loadPlanningData() {
+            try {
+                const res = await fetch('/api/cockpit/operations', { headers: { 'Authorization': `Bearer ${token}` } });
+                cachedAllOps = await res.json();
+                await loadWorkstations();
+                await renderCalendar();
+                renderPool();
+            } catch (err) { console.error(err); }
+        }
+
+        // Takvim Render
+        async function renderCalendar() {
+            const grid = document.getElementById('calendarGrid');
+            grid.innerHTML = '';
+
+            // Tüm istasyonlar seçiliyken takvimi doldurma, yönlendirme mesajı ver
+            if (!currentSelectedCatId) {
+                grid.innerHTML = `
+                    <div style="grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: #64748b;">
+                        <div style="font-size: 2.5rem; margin-bottom: 10px;">📋</div>
+                        <h3 style="color: #cbd5e1; margin-bottom: 6px;">Tezgâh Çizelgelemesi İçin İstasyon Seçin</h3>
+                        <p style="font-size: 0.85rem;">Yukarıdaki sekmelerden (LZR, ABK, KYN vb.) bir istasyon seçerek tezgâh/masa bazlı haftalık planlama yapabilirsiniz.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const dayNames = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+            const weekStartStr = currentViewMonday.toISOString().split('T')[0];
+            const endOfWeek = new Date(currentViewMonday);
+            endOfWeek.setDate(endOfWeek.getDate() + 5);
+            document.getElementById('weekRangeLabel').innerText = `${weekStartStr} - ${endOfWeek.toISOString().split('T')[0]}`;
+
+            for (let i = 0; i < 6; i++) {
+                const dayDate = new Date(currentViewMonday);
+                dayDate.setDate(currentViewMonday.getDate() + i);
+                const dateStr = dayDate.toISOString().split('T')[0];
+
+                const col = document.createElement('div');
+                col.className = 'cal-column';
+                col.innerHTML = `
+                    <div class="cal-column-header">
+                        ${dayNames[i]}<br>
+                        <span style="color:#94a3b8; font-size:0.75rem;">${dateStr.slice(5)}</span>
+                    </div>
+                `;
+
+                let dayOps = cachedAllOps.filter(o => o.scheduled_date === dateStr && o.category_id === currentSelectedCatId);
+
+                if (cachedWorkstations.length > 0) {
+                    cachedWorkstations.forEach(ws => {
+                        const laneOps = dayOps.filter(o => o.assigned_workstation_id === ws.id);
+                        const laneMin = laneOps.reduce((acc, o) => acc + (o.planned_duration_min || 0), 0);
+                        const pct = Math.min(Math.round((laneMin / 510) * 100), 100);
+
+                        const lane = document.createElement('div');
+                        lane.className = 'workstation-lane';
+                        lane.ondragover = (e) => { e.preventDefault(); lane.classList.add('drag-over'); };
+                        lane.ondragleave = () => lane.classList.remove('drag-over');
+                        lane.ondrop = (e) => handleDrop(e, dateStr, ws.id);
+
+                        lane.innerHTML = `
+                            <div class="lane-header">
+                                <span style="color:#38bdf8;">${ws.station_code}</span>
+                                <span style="color:${pct >= 100 ? '#ef4444' : '#94a3b8'}">${laneMin.toFixed(0)}/510 dk (%${pct})</span>
+                            </div>
+                            <div class="capacity-bar-container">
+                                <div class="capacity-bar-fill ${pct >= 100 ? 'danger' : ''}" style="width: ${pct}%;"></div>
+                            </div>
+                        `;
+
+                        laneOps.forEach(job => {
+                            const card = createJobCard(job);
+                            lane.appendChild(card);
+                        });
+
+                        col.appendChild(lane);
+                    });
+                } else {
+                    col.innerHTML += `<div style="font-size:0.75rem; color:#475569; text-align:center; margin-top:20px;">Tanımlı tezgâh yok.</div>`;
+                }
+
+                grid.appendChild(col);
+            }
+        }
+
+        function createJobCard(job) {
+            const card = document.createElement('div');
+            card.className = 'cal-job-card';
+            card.draggable = true;
+            card.ondragstart = (e) => handleDragStart(e, job.id);
+            card.ondragend = handleDragEnd;
+
+            const pct = Math.min(Math.max(job.progress_pct || 0, 0), 100);
+            const isOverdue = Boolean(job.is_overdue);
+
+            const barGradient = isOverdue
+                ? 'background: linear-gradient(90deg, #ef4444, #dc2626); box-shadow: 0 0 6px rgba(239, 68, 68, 0.8);'
+                : 'background: linear-gradient(90deg, #38bdf8, #10b981);';
+
+            const pctTextColor = isOverdue ? '#ef4444' : '#10b981';
+            const timeTextColor = isOverdue ? '#ef4444' : '#38bdf8';
+
+            if (isOverdue) {
+                card.style.borderLeftColor = '#ef4444';
+            }
+
+            card.innerHTML = `
+                <div class="cal-job-doc">#${job.sap_doc_num} - ${job.item_code}</div>
+                <div style="color:#94a3b8; font-size:0.7rem;">${job.category_name} (${job.planned_qty} Ad.)</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-weight:700; color:${timeTextColor}; font-size:0.75rem;">
+                            ⏱ ${job.planned_duration_min || 0} dk ${isOverdue ? '⚠️' : ''}
+                        </span>
+                        <div style="display:flex; align-items:center; gap:4px;" title="Toplam Üretim İlerlemesi: %${pct} ${isOverdue ? '(İstasyon Hedef Süresi Aşıldı!)' : ''}">
+                            <div style="width:42px; height:5px; background-color:#334155; border-radius:3px; overflow:hidden; display:inline-block;">
+                                <div style="width:${pct}%; height:100%; ${barGradient} border-radius:3px; transition: width 0.4s ease;"></div>
+                            </div>
+                            <span style="font-size:0.65rem; color:${pctTextColor}; font-weight:800;">%${Math.round(pct)}</span>
+                        </div>
+                    </div>
+                    <!-- Sağ Kısım: Masa Kodu -->
+                    <span style="font-size:0.68rem; color:#64748b; font-weight:600;">${job.workstation_code || 'Masa Yok'}</span>
+                </div>
+            `;
+            return card;
+        }
+
+        // Havuz Render: Sahaya inmiş ama henüz masası atanmamış operasyonlar
+        function renderPool() {
+            const container = document.getElementById('poolContainer');
+            container.innerHTML = '';
+
+            let unassigned = cachedAllOps.filter(o => o.is_unlocked && !o.assigned_workstation_id);
+            if (currentSelectedCatId) {
+                unassigned = unassigned.filter(o => o.category_id === currentSelectedCatId);
+            }
+
+            document.getElementById('poolCountBadge').innerText = `${unassigned.length} Sipariş Bekliyor`;
+
+            if (unassigned.length === 0) {
+                container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; color:#64748b; padding:20px;">Tüm açık siparişler tezgâhlara yerleştirildi.</div>`;
+                return;
+            }
+
+            unassigned.forEach(op => {
+                const card = document.createElement('div');
+                card.className = 'pool-card';
+                card.draggable = true;
+                card.ondragstart = (e) => handleDragStart(e, op.id);
+                card.ondragend = handleDragEnd;
+
+                card.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <strong style="color:#ffffff;">#${op.sap_doc_num}</strong>
+                        <span style="font-size:0.75rem; color:#38bdf8; font-weight:700;">⏱ ${op.planned_duration_min || 0} dk</span>
+                    </div>
+                    <div style="color:#38bdf8; font-weight:600; font-size:0.8rem;">${op.item_code}</div>
+                    <div style="color:#94a3b8; font-size:0.75rem; margin-top:2px;">${op.category_name} - ${op.planned_qty} Adet (Aşama: ${op.stage_order})</div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        // Drag & Drop
+        function handleDragStart(e, opId) {
+            draggedOpId = opId;
+            e.target.classList.add('dragging');
+            e.dataTransfer.setData('text/plain', opId);
+        }
+
+        function handleDragEnd(e) {
+            e.target.classList.remove('dragging');
+            document.querySelectorAll('.workstation-lane').forEach(l => l.classList.remove('drag-over'));
+        }
+
+        async function handleDrop(e, targetDate, wsId) {
+            e.preventDefault();
+            document.querySelectorAll('.workstation-lane').forEach(l => l.classList.remove('drag-over'));
+            if (!draggedOpId) return;
+
+            try {
+                const res = await fetch('/api/cockpit/schedule', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({
+                        operation_id: draggedOpId,
+                        scheduled_date: targetDate,
+                        workstation_id: wsId
+                    })
+                });
+
+                if (!res.ok) throw new Error("Çizelgeleme başarısız.");
+                await loadPlanningData();
+            } catch (err) {
+                alert(err.message);
+            } finally {
+                draggedOpId = null;
+            }
+        }
+
+        // Çekmece
+        async function openStationDrawer(catId, stationTitle) {
+            document.getElementById('drawerStationTitle').innerText = stationTitle;
+            const content = document.getElementById('drawerContent');
+            content.innerHTML = '<div style="text-align:center; padding:30px; color:#64748b;">Yükleniyor...</div>';
+            document.getElementById('drawerOverlay').style.display = 'flex';
+
+            try {
+                const res = await fetch(`/api/cockpit/station-workload/${catId}`, { headers: { 'Authorization': `Bearer ${token}` } });
+                const workload = await res.json();
+                renderDrawer(workload);
+            } catch (e) { content.innerHTML = '<div style="color:#ef4444;">Hata oluştu.</div>'; }
+        }
+
+        function renderDrawer(workload) {
+            const content = document.getElementById('drawerContent');
+            content.innerHTML = '';
+            if (workload.length === 0) {
+                content.innerHTML = '<div style="text-align:center; padding:30px; color:#64748b;">Kuyrukta sipariş yok.</div>';
+                return;
+            }
+
+            workload.forEach(item => {
+                const div = document.createElement('div');
+                div.className = `drawer-item ${!item.is_unlocked ? 'blocked' : ''}`;
+                let badge = item.is_unlocked
+                    ? '<span class="drawer-badge-ready">İŞE HAZIR / SAHADA</span>'
+                    : `<span class="drawer-badge-blocked">BEKLİYOR: ${item.blocking_station || 'Önceki İstasyon'}</span>`;
+
+                div.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <strong style="color:#ffffff;">#${item.sap_doc_num} - ${item.item_code}</strong>
+                        ${badge}
+                    </div>
+                    <div style="color:#94a3b8; font-size:0.75rem; margin-bottom:4px;">${item.item_description || ''}</div>
+                    <div style="display:flex; justify-content:space-between; font-size:0.72rem; color:#cbd5e1;">
+                        <span>Sıra: ${item.stage_order} | Miktar: ${item.planned_qty}</span>
+                        <span>Planlanan: ${item.scheduled_date || 'Tarih Yok'}</span>
+                    </div>
+                `;
+                content.appendChild(div);
+            });
+        }
+
+        function closeDrawerDirect() {
+            document.getElementById('drawerOverlay').style.display = 'none';
+        }
+
+        // Sevkiyat / Depo Modalı Fonksiyonları
+        async function openShippingModal() {
+            document.getElementById('shippingModal').style.display = 'flex';
+            document.getElementById('shippingSearchInput').value = '';
+            const container = document.getElementById('shippingListContainer');
+            container.innerHTML = '<div style="text-align:center; padding:30px; color:#64748b;">Biten ürünler taranıyor...</div>';
+
+            try {
+                const res = await fetch('/api/cockpit/shipping-orders', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) throw new Error("Sevkiyat listesi alınamadı.");
+                rawShippingOrders = await res.json();
+                renderShippingList(rawShippingOrders);
+            } catch (e) {
+                container.innerHTML = `<div style="text-align:center; color:#ef4444; padding:20px;">${e.message}</div>`;
+            }
+        }
+
+        function closeShippingModal() {
+            document.getElementById('shippingModal').style.display = 'none';
+        }
+
+        function renderShippingList(orders) {
+            const container = document.getElementById('shippingListContainer');
+            container.innerHTML = '';
+
+            if (orders.length === 0) {
+                container.innerHTML = '<div style="text-align:center; padding:40px; color:#64748b;">Depoda bekleyen tamamlanmış sipariş bulunmuyor.</div>';
+                updateShippingSelectionCount();
+                return;
+            }
+
+            orders.forEach(ord => {
+                const row = document.createElement('div');
+                row.style = "display:grid; grid-template-columns: 40px 100px 2fr 1fr 1fr; align-items:center; background-color:#0f172a; border:1px solid #334155; border-radius:8px; padding:10px 14px; gap:10px;";
+                row.innerHTML = `
+                    <div>
+                        <input type="checkbox" class="shipping-checkbox" value="${ord.sap_doc_entry}" onchange="updateShippingSelectionCount()" style="width:18px; height:18px; cursor:pointer;">
+                    </div>
+                    <div><strong style="color:#ffffff;">#${ord.sap_doc_num}</strong></div>
+                    <div>
+                        <div style="font-weight:700; color:#38bdf8;">${ord.item_code}</div>
+                        <div style="font-size:0.75rem; color:#94a3b8;">${ord.item_description || ''}</div>
+                    </div>
+                    <div style="font-weight:700; color:#10b981; font-size:0.85rem;">
+                        ${ord.completed_qty} / ${ord.planned_qty} Adet
+                    </div>
+                    <div style="text-align:right; font-size:0.75rem; color:#cbd5e1;">
+                        Termin: ${ord.due_date || 'Tarihsiz'}
+                    </div>
+                `;
+                container.appendChild(row);
+            });
+
+            updateShippingSelectionCount();
+        }
+
+        function filterShippingList() {
+            const query = document.getElementById('shippingSearchInput').value.toLowerCase().trim();
+            const filtered = rawShippingOrders.filter(o =>
+                o.item_code.toLowerCase().includes(query) ||
+                String(o.sap_doc_num).includes(query) ||
+                (o.item_description && o.item_description.toLowerCase().includes(query))
+            );
+            renderShippingList(filtered);
+        }
+
+        function toggleSelectAllShipping(btn) {
+            const checkboxes = document.querySelectorAll('.shipping-checkbox');
+            const allChecked = Array.from(checkboxes).every(c => c.checked);
+            checkboxes.forEach(c => c.checked = !allChecked);
+            btn.innerText = allChecked ? "Tümünü Seç" : "Seçimi Kaldır";
+            updateShippingSelectionCount();
+        }
+
+        function updateShippingSelectionCount() {
+            const selected = document.querySelectorAll('.shipping-checkbox:checked').length;
+            document.getElementById('shippingSelectedCountLabel').innerText = `${selected} sipariş seçildi`;
+        }
+
+        async function submitCloseOrders() {
+            const selectedCheckboxes = document.querySelectorAll('.shipping-checkbox:checked');
+            const docEntries = Array.from(selectedCheckboxes).map(c => parseInt(c.value));
+
+            if (docEntries.length === 0) {
+                alert("Lütfen tamamlamak istediğiniz en az bir sipariş seçin.");
+                return;
+            }
+
+            if (!confirm(`${docEntries.length} adet siparişi tamamen kapatıp arşivlemek istediğinize emin misiniz? Bu işler üretim ekranlarından kalkacaktır.`)) {
+                return;
+            }
+
+            const btn = document.getElementById('btnSubmitClose');
+            btn.disabled = true;
+            btn.innerText = "⏳ Kapatılıyor...";
+
+            try {
+                const res = await fetch('/api/cockpit/close-orders', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ sap_doc_entries: docEntries })
+                });
+
+                if (!res.ok) throw new Error("Siparişler kapatılamadı.");
+                const result = await res.json();
+                alert(result.message);
+                closeShippingModal();
+                await loadStationTelemetry();
+                await loadPlanningData();
+            } catch (e) {
+                alert(e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Seçilenleri Tamamla ve Arşivle";
+            }
+        }
+
+        async function syncFromSAP() {
+            const btn = document.getElementById('btnSync');
+            btn.disabled = true;
+            btn.innerHTML = "⏳ Çekiliyor...";
+            try {
+                const res = await fetch('/api/jobs/sync-from-sap', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+                const d = await res.json();
+                alert(d.message);
+                await loadStationTelemetry();
+                await loadPlanningData();
+            } catch (e) { alert(e.message); }
+            finally {
+                btn.disabled = false;
+                btn.innerHTML = `<span>🔄</span> SAP'den İşleri Çek`;
+            }
+        }
+
+        function logout() {
+            localStorage.clear();
+            window.location.href = '/';
+        }
+
+        loadStationTelemetry();
+        loadPlanningData();
+        setInterval(async () => {
+            // Kullanıcı bir kartı sürüklerken arayüzün yeniden çizilip sürüklemeyi bozmasını engelle
+            if (!draggedOpId) {
+            await loadStationTelemetry();
+            await loadPlanningData();
+    }
+}, 5000);
+    </script>
+</body>
+</html>

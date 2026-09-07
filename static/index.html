@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>QMT - Saha ve Yönetim Girişi</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .login-card {
+            background-color: #1e293b;
+            width: 100%;
+            max-width: 440px;
+            padding: 40px 32px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+            border: 1px solid #334155;
+            text-align: center;
+        }
+
+        .logo-container {
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .logo-container img {
+            max-height: 90px;
+            max-width: 220px;
+            object-fit: contain;
+            filter: drop-shadow(0 2px 8px rgba(0, 115, 230, 0.2));
+        }
+
+        .title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #94a3b8;
+            margin-bottom: 28px;
+            letter-spacing: 0.5px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #cbd5e1;
+            margin-bottom: 8px;
+        }
+
+        .input-group input {
+            width: 100%;
+            height: 54px;
+            background-color: #0f172a;
+            border: 1.5px solid #334155;
+            border-radius: 8px;
+            padding: 0 16px;
+            color: #ffffff;
+            font-size: 1.1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .input-group input:focus {
+            border-color: #0284c7;
+            box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.25);
+        }
+
+        .btn-submit {
+            width: 100%;
+            height: 56px;
+            background-color: #0284c7;
+            border: none;
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 1.15rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 12px;
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        .btn-submit:active {
+            transform: scale(0.98);
+            background-color: #0369a1;
+        }
+
+        .error-message {
+            margin-top: 16px;
+            padding: 10px;
+            background-color: rgba(239, 68, 68, 0.1);
+            border: 1px solid #ef4444;
+            color: #f87171;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="login-card">
+        <div class="logo-container">
+            <img src="/static/images/QMT_LOGO.png" alt="QMT Logo" onerror="this.style.display='none'">
+        </div>
+        <div class="title">İstasyon & Yönetim Terminali</div>
+
+        <form id="loginForm">
+            <div class="input-group">
+                <label for="username">Kullanıcı / İstasyon Kodu</label>
+                <input type="text" id="username" autocomplete="off" autocorrect="off" autocapitalize="none" placeholder="Username" required>
+            </div>
+
+            <div class="input-group">
+                <label for="password">Şifre / PIN</label>
+                <input type="password" id="password" placeholder="••••" required>
+            </div>
+
+            <button type="submit" class="btn-submit" id="submitBtn">Giriş Yap</button>
+
+            <div id="errorMessage" class="error-message"></div>
+        </form>
+    </div>
+
+    <script>
+        const loginForm = document.getElementById('loginForm');
+        const errorMessage = document.getElementById('errorMessage');
+        const submitBtn = document.getElementById('submitBtn');
+
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorMessage.style.display = 'none';
+            submitBtn.innerText = 'Kontrol ediliyor...';
+            submitBtn.disabled = true;
+
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value.trim();
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Giriş yapılamadı.');
+                }
+
+                // Token ve kullanıcı verilerini sakla
+                localStorage.setItem('uvt_token', data.access_token);
+                localStorage.setItem('uvt_user', JSON.stringify({
+                    id: data.user_id,
+                    username: data.username,
+                    role: data.role
+                }));
+
+                // Role göre dinamik yönlendirme
+                if (data.role === 'OPERATOR') {
+                    window.location.href = '/station';
+                } else if (data.role === 'ADMIN' || data.role === 'PLANNER') {
+                    window.location.href = '/cockpit';
+                } else {
+                    throw new Error('Tanımlanmamış kullanıcı rolü.');
+                }
+
+            } catch (err) {
+                errorMessage.innerText = err.message;
+                errorMessage.style.display = 'block';
+                submitBtn.innerText = 'Giriş Yap';
+                submitBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

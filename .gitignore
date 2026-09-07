@@ -1,0 +1,25 @@
+# Python önbellekleri
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Sanal ortam
+venv/
+env/
+.venv/
+
+# Hassas veriler ve çevre değişkenleri
+.env
+config.json
+*.pem
+*.key
+
+# IDE ve sistem dosyaları
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Geçici ve log dosyaları
+*.log

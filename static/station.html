@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>QMT - İstasyon Terminali</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+
+        body {
+            background-color: #0b1120;
+            color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+        }
+
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #1e293b;
+            padding: 12px 24px;
+            border-radius: 12px;
+            border: 1px solid #334155;
+            margin-bottom: 16px;
+        }
+
+        .station-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .station-logo {
+            max-height: 44px;
+            object-fit: contain;
+        }
+
+        .station-name {
+            font-size: 1.35rem;
+            font-weight: 800;
+            color: #38bdf8;
+            letter-spacing: 0.5px;
+        }
+
+        .top-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .select-workstation {
+            background-color: #0f172a;
+            color: #38bdf8;
+            border: 2px solid #0284c7;
+            padding: 8px 14px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            border-radius: 8px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .logout-btn {
+            background-color: #334155;
+            color: #f1f5f9;
+            border: none;
+            padding: 10px 18px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .logout-btn:hover { background-color: #475569; }
+
+        .active-job-container {
+            background-color: #1e293b;
+            border: 2px solid #334155;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .job-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #334155;
+            margin-bottom: 20px;
+        }
+
+        .summary-item label {
+            display: block;
+            font-size: 0.75rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .summary-item span {
+            font-size: 1.15rem;
+            color: #ffffff;
+            font-weight: 800;
+        }
+
+        .action-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+        }
+
+        .btn-action {
+            height: 90px;
+            border: none;
+            border-radius: 14px;
+            font-size: 1.5rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            color: #ffffff;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 6px 15px rgba(0,0,0,0.4);
+            transition: transform 0.1s, opacity 0.2s;
+        }
+
+        .btn-action:active:not(:disabled) {
+            transform: scale(0.97);
+        }
+
+        .btn-start {
+            background: linear-gradient(135deg, #10b981, #059669);
+        }
+
+        .btn-pause {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: #0f172a;
+        }
+
+        .btn-complete {
+            background: linear-gradient(135deg, #ef4444, #b91c1c);
+        }
+
+        .btn-action:disabled {
+            background: #334155 !important;
+            color: #64748b !important;
+            cursor: not-allowed;
+            box-shadow: none;
+            opacity: 0.45;
+        }
+
+        .queue-container {
+            flex: 1;
+            background-color: #1e293b;
+            border-radius: 16px;
+            border: 1px solid #334155;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .queue-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+
+        .queue-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #e2e8f0;
+        }
+
+        .queue-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding-right: 4px;
+        }
+
+        .job-card {
+            background-color: #0f172a;
+            border: 2px solid #334155;
+            border-radius: 12px;
+            padding: 14px 18px;
+            cursor: pointer;
+            transition: border-color 0.2s, background-color 0.2s;
+            display: grid;
+            grid-template-columns: 90px 2fr 1.5fr 1fr 130px;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .job-card:hover {
+            border-color: #38bdf8;
+        }
+
+        .job-card.active-selected {
+            border-color: #38bdf8;
+            background-color: #172554;
+        }
+
+        .job-card.disabled-card {
+            opacity: 0.4;
+            border-style: dashed;
+        }
+
+        .badge {
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 800;
+            text-align: center;
+            display: inline-block;
+        }
+
+        .badge-pending { background-color: #0284c7; color: white; }
+        .badge-inprogress { background-color: #10b981; color: white; }
+        .badge-paused { background-color: #f59e0b; color: #0f172a; }
+        .badge-locked { background-color: #475569; color: #cbd5e1; }
+        .badge-completed { background-color: #334155; color: #94a3b8; }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(4px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+
+        .modal-box {
+            background-color: #1e293b;
+            border-radius: 20px;
+            width: 100%;
+            max-width: 520px;
+            padding: 26px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.8);
+        }
+
+        .modal-confirm-box { border: 2px solid #ef4444; text-align: center; }
+        .modal-title-confirm { font-size: 1.3rem; color: #ef4444; font-weight: 800; margin-bottom: 14px; }
+        .modal-text { font-size: 1.15rem; color: #f8fafc; line-height: 1.5; margin-bottom: 24px; }
+        .modal-target { color: #38bdf8; font-weight: 800; text-decoration: underline; }
+
+        .modal-pause-box { border: 2px solid #f59e0b; }
+        .modal-title-pause { font-size: 1.3rem; color: #f59e0b; font-weight: 800; margin-bottom: 6px; }
+        .modal-subtitle { font-size: 0.85rem; color: #94a3b8; margin-bottom: 16px; }
+
+        .pause-reasons-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+        .btn-reason {
+            background-color: #0f172a;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            padding: 12px 10px;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.15s ease;
+        }
+
+        .btn-reason:hover { border-color: #f59e0b; background-color: #1e293b; }
+        .btn-reason.selected { background-color: #f59e0b; color: #0f172a; border-color: #f59e0b; font-weight: 800; }
+
+        .reason-input {
+            width: 100%;
+            background-color: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            padding: 12px 14px;
+            color: #ffffff;
+            font-size: 0.95rem;
+            outline: none;
+            margin-bottom: 20px;
+            user-select: text;
+        }
+
+        .modal-buttons { display: grid; grid-template-columns: 1fr 1.5fr; gap: 12px; }
+        .btn-modal-cancel { background-color: #334155; color: #f8fafc; border: none; height: 50px; border-radius: 10px; font-size: 0.95rem; font-weight: 700; cursor: pointer; }
+        .btn-modal-confirm { background-color: #10b981; color: white; border: none; height: 50px; border-radius: 10px; font-size: 1.05rem; font-weight: 800; cursor: pointer; }
+        .btn-modal-pause-confirm { background-color: #f59e0b; color: #0f172a; border: none; height: 50px; border-radius: 10px; font-size: 1.05rem; font-weight: 800; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <div class="top-bar">
+        <div class="station-info">
+            <img src="/static/images/QMT_LOGO.png" alt="QMT" class="station-logo" onerror="this.style.display='none'">
+            <div class="station-name" id="stationDisplay">İSTASYON YÜKLENİYOR...</div>
+        </div>
+        <div class="top-actions">
+            <select id="workstationSelect" class="select-workstation" onchange="onWorkstationChange()">
+                <option value="">Tüm Masalar / Ortak Havuz</option>
+            </select>
+            <button class="logout-btn" onclick="logout()">Çıkış Yap</button>
+        </div>
+    </div>
+
+    <div class="active-job-container">
+        <div class="job-summary">
+            <div class="summary-item">
+                <label>Sipariş / Ürün Kodu</label>
+                <span id="currentDocItem">-</span>
+            </div>
+            <div class="summary-item">
+                <label>Ürün Açıklaması</label>
+                <span id="currentItemDesc">-</span>
+            </div>
+            <div class="summary-item">
+                <label>Planlanan / Biten Adet</label>
+                <span id="currentQty">-</span>
+            </div>
+            <div class="summary-item">
+                <label>Sonraki İstasyon</label>
+                <span id="currentNextStation" style="color:#38bdf8;">-</span>
+            </div>
+            <div class="summary-item">
+                <label>Durum</label>
+                <span id="currentStatus">-</span>
+            </div>
+            <div class="summary-item">
+                <label>Durum</label>
+                <span id="currentStatus">-</span>
+            </div>
+            <!-- CANLI SAYAÇ KUTUSU -->
+            <div class="summary-item" style="border-left: 2px solid #334155; padding-left: 12px;">
+                <label style="color: #38bdf8;">Geçen Süre / Hedef</label>
+                <div id="liveTimerDisplay" style="font-size: 1.15rem; font-weight: 800; color: #94a3b8; font-family: monospace;">
+                    00:00:00 <span style="font-size: 0.8rem; color: #64748b; font-family: sans-serif;">(Hedef: 0 dk)</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="action-grid">
+            <button class="btn-action btn-start" id="btnStart" onclick="handleStart()" disabled>BAŞLAT</button>
+            <button class="btn-action btn-pause" id="btnPause" onclick="openPauseModal()" disabled>DURDUR</button>
+            <button class="btn-action btn-complete" id="btnComplete" onclick="openCompleteModal()" disabled>BİTİR</button>
+        </div>
+    </div>
+
+    <div class="queue-container">
+        <div class="queue-header">
+            <div class="queue-title">İstasyon İş Kuyruğu</div>
+            <button class="logout-btn" onclick="loadQueue()" style="padding: 6px 14px; font-size: 0.85rem;">Listeyi Yenile</button>
+        </div>
+        <div class="queue-list" id="queueList"></div>
+    </div>
+
+    <div class="modal-overlay" id="pauseModal">
+        <div class="modal-box modal-pause-box">
+            <div class="modal-title-pause">İŞİ DURAKLAT - DURUŞ NEDENİ</div>
+            <div class="modal-subtitle">Lütfen duruş sebebini seçin veya açıklama girin:</div>
+
+            <div class="pause-reasons-grid">
+                <button type="button" class="btn-reason" onclick="selectReason(this, '🍽️ Yemek / Çay Molası')">🍽️ Yemek / Çay Molası</button>
+                <button type="button" class="btn-reason" onclick="selectReason(this, '📦 Hammadde / Sac Bekleme')">📦 Hammadde / Sac Bekleme</button>
+                <button type="button" class="btn-reason" onclick="selectReason(this, '⚙️ Makine Arızası')">⚙️ Makine Arızası</button>
+                <button type="button" class="btn-reason" onclick="selectReason(this, '🔧 Takım / Nozul Bakımı')">🔧 Takım / Nozul Bakımı</button>
+                <button type="button" class="btn-reason" onclick="selectReason(this, '🔄 Vardiya Değişimi')">🔄 Vardiya Değişimi</button>
+                <button type="button" class="btn-reason" onclick="selectReason(this, 'Diğer')">✏️ Diğer (Manuel Giriş)</button>
+            </div>
+
+            <input type="text" id="customPauseReason" class="reason-input" placeholder="Duruş sebebi yazın...">
+
+            <div class="modal-buttons">
+                <button class="btn-modal-cancel" onclick="closePauseModal()">Vazgeç</button>
+                <button class="btn-modal-pause-confirm" onclick="confirmAndPause()">Durdurmayı Onayla</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="confirmModal">
+        <div class="modal-box modal-confirm-box">
+            <div class="modal-title-confirm">DİKKAT: OPERASYON TAMAMLAMA</div>
+            <div class="modal-text">
+                Ürünleri bir sonraki <span class="modal-target" id="modalTargetStation">...</span> istasyonuna götürdün mü?
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-modal-cancel" onclick="closeCompleteModal()">Hayır, Götürmedim</button>
+                <button class="btn-modal-confirm" onclick="confirmAndComplete()">Evet, Götürdüm / Tamamla</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem('uvt_token');
+        const storedUser = JSON.parse(localStorage.getItem('uvt_user') || '{}');
+
+        if (!token) {
+            window.location.href = '/';
+        }
+
+        let stationName = storedUser.username || '';
+        if (!stationName || !isNaN(stationName)) {
+            try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                stationName = payload.username || (isNaN(payload.sub) ? payload.sub : 'LZR');
+            } catch (e) {
+                stationName = 'LZR';
+            }
+        }
+
+        document.getElementById('stationDisplay').innerText = `${stationName.toUpperCase()} İSTASYONU`;
+
+        let currentQueue = [];
+        let selectedJob = null;
+        let selectedWorkstationId = localStorage.getItem(`uvt_ws_${stationName}`) || '';
+
+        let liveSeconds = 0;
+    let timerInterval = null;
+
+    function startLiveTimer() {
+        clearInterval(timerInterval);
+        const timerEl = document.getElementById('liveTimerDisplay');
+        if (!timerEl) return;
+
+        if (!selectedJob) {
+            timerEl.innerHTML = `00:00:00 <span style="font-size: 0.8rem; color: #64748b;">(Hedef: 0 dk)</span>`;
+            timerEl.style.color = '#94a3b8';
+            timerEl.style.fontSize = '1.15rem';
+            timerEl.style.textShadow = 'none';
+            return;
+        }
+
+        liveSeconds = selectedJob.elapsed_work_seconds || 0;
+        const targetMin = selectedJob.planned_duration_min || 0;
+        const targetSec = targetMin * 60;
+
+        function updateDisplay() {
+            if (selectedJob && selectedJob.status === 'IN_PROGRESS') {
+                liveSeconds += 1;
+            }
+
+            const hrs = String(Math.floor(liveSeconds / 3600)).padStart(2, '0');
+            const mins = String(Math.floor((liveSeconds % 3600) / 60)).padStart(2, '0');
+            const secs = String(Math.floor(liveSeconds % 60)).padStart(2, '0');
+
+            // Hedef süre aşıldı mı kontrolü (0'dan büyükse ve saniye aşıldıysa)
+            const isOverdue = targetSec > 0 && liveSeconds > targetSec;
+
+            if (isOverdue) {
+                timerEl.style.color = '#ef4444';
+                timerEl.style.fontSize = '1.5rem';
+                timerEl.style.fontWeight = '900';
+                timerEl.style.textShadow = '0 0 12px rgba(239, 68, 68, 0.7)';
+            } else {
+                timerEl.style.color = selectedJob.status === 'IN_PROGRESS' ? '#10b981' : (selectedJob.status === 'PAUSED' ? '#f59e0b' : '#38bdf8');
+                timerEl.style.fontSize = '1.15rem';
+                timerEl.style.fontWeight = '800';
+                timerEl.style.textShadow = 'none';
+            }
+
+            timerEl.innerHTML = `⏱ ${hrs}:${mins}:${secs} <span style="font-size: 0.8rem; color: #94a3b8; font-weight: 600; text-shadow:none;">(Hedef: ${targetMin} dk)</span>`;
+        }
+
+        updateDisplay();
+        timerInterval = setInterval(updateDisplay, 1000);
+    }
+
+        async function loadWorkstations() {
+            try {
+                const res = await fetch('/api/cockpit/workstations', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) return;
+                const wsList = await res.json();
+
+                const selectEl = document.getElementById('workstationSelect');
+                selectEl.innerHTML = '<option value="">Tüm Masalar / Ortak Havuz</option>';
+
+                wsList.forEach(ws => {
+                    const opt = document.createElement('option');
+                    opt.value = ws.id;
+                    opt.innerText = `${ws.station_code} - ${ws.station_name}`;
+                    if (String(ws.id) === String(selectedWorkstationId)) {
+                        opt.selected = true;
+                    }
+                    selectEl.appendChild(opt);
+                });
+            } catch (e) { console.error(e); }
+        }
+
+        function onWorkstationChange() {
+            const selectEl = document.getElementById('workstationSelect');
+            selectedWorkstationId = selectEl.value;
+            localStorage.setItem(`uvt_ws_${stationName}`, selectedWorkstationId);
+            selectedJob = null;
+            resetControlPanel();
+            loadQueue();
+        }
+
+        async function loadQueue() {
+            try {
+                let url = '/api/jobs/queue';
+                if (selectedWorkstationId) {
+                    url += `?workstation_id=${selectedWorkstationId}`;
+                }
+
+                const res = await fetch(url, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (!res.ok) {
+                    if (res.status === 401) logout();
+                    throw new Error('İş listesi alınamadı.');
+                }
+
+                currentQueue = await res.json();
+                renderQueue();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        function renderQueue() {
+            const listEl = document.getElementById('queueList');
+            listEl.innerHTML = '';
+
+            // Kilitli işler backend'de elendi; yine de sadece açık işleri alıyoruz
+            let visibleJobs = currentQueue.filter(j => j.is_unlocked);
+
+            if (visibleJobs.length === 0) {
+                listEl.innerHTML = '<div style="text-align:center; padding: 40px; color: #64748b;">Bu istasyonda bekleyen veya çalışan iş bulunmuyor.</div>';
+                resetControlPanel();
+                return;
+            }
+
+            // Sıralama Hiyerarşisi:
+            // 1: IN_PROGRESS (Çalışıyor)
+            // 2: PENDING (Bekliyor / Başlamaya Hazır)
+            // 3: COMPLETED (Tamamlandı)
+            // 4: Günü Gelmedi
+            visibleJobs.sort((a, b) => {
+                function getPriority(job) {
+                    if (job.status === 'IN_PROGRESS') return 1;
+                    if (job.status === 'PENDING' && job.is_scheduled_today) return 2;
+                    if (job.status === 'COMPLETED') return 3;
+                    return 4;
+                }
+                return getPriority(a) - getPriority(b);
+            });
+
+            visibleJobs.forEach(job => {
+                const card = document.createElement('div');
+                const isExecutable = job.is_scheduled_today && job.status !== 'COMPLETED';
+
+                card.className = `job-card ${!isExecutable ? 'disabled-card' : ''} ${selectedJob?.id === job.id ? 'active-selected' : ''}`;
+                card.onclick = () => selectJob(job);
+
+                let badgeClass = 'badge-pending';
+                let statusText = 'BEKLİYOR';
+
+                if (job.status === 'IN_PROGRESS') {
+                    badgeClass = 'badge-inprogress';
+                    statusText = 'ÇALIŞIYOR';
+                } else if (job.status === 'PAUSED') {
+                    badgeClass = 'badge-paused';
+                    statusText = 'DURDURULDU';
+                } else if (job.status === 'COMPLETED') {
+                    badgeClass = 'badge-completed';
+                    statusText = 'TAMAMLANDI';
+                } else if (!job.is_scheduled_today) {
+                    badgeClass = 'badge-locked';
+                    statusText = 'GÜNÜ GELMEDİ';
+                }
+
+                card.innerHTML = `
+                    <div><strong>#${job.sap_doc_num}</strong></div>
+                    <div>
+                        <div style="font-weight:700; color:#f8fafc;">${job.item_code}</div>
+                        <div style="font-size:0.8rem; color:#94a3b8;">${job.item_description || ''}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.75rem; color:#94a3b8;">Sonraki İstasyon:</div>
+                        <div style="color:#38bdf8; font-weight:600;">${job.next_category_name}</div>
+                    </div>
+                    <div><strong>${job.completed_qty} / ${job.planned_qty}</strong> Adet</div>
+                    <div><span class="badge ${badgeClass}">${statusText}</span></div>
+                `;
+
+                listEl.appendChild(card);
+            });
+
+            // Otomatik odaklama: Çalışan iş varsa ona, yoksa sıradaki ilk bekleyen işe odaklan
+            if (!selectedJob || !visibleJobs.some(j => j.id === selectedJob.id)) {
+                const activeJob = visibleJobs.find(j => j.status === 'IN_PROGRESS')
+                               || visibleJobs.find(j => j.status === 'PENDING' && j.is_scheduled_today);
+                if (activeJob) selectJob(activeJob);
+                else resetControlPanel();
+            } else {
+                const current = visibleJobs.find(j => j.id === selectedJob.id);
+                if (current) {
+                    selectedJob = current;
+                    updateControlPanel();
+                }
+            }
+        }
+
+        function selectJob(job) {
+            selectedJob = job;
+            updateControlPanel();
+
+            document.querySelectorAll('.job-card').forEach(c => {
+                c.classList.remove('active-selected');
+                if (c.innerHTML.includes(`#${job.sap_doc_num}`)) {
+                    c.classList.add('active-selected');
+                }
+            });
+        }
+
+        function resetControlPanel() {
+            document.getElementById('currentDocItem').innerText = '-';
+            document.getElementById('currentItemDesc').innerText = '-';
+            document.getElementById('currentQty').innerText = '-';
+            document.getElementById('currentNextStation').innerText = '-';
+            document.getElementById('currentStatus').innerText = '-';
+
+            document.getElementById('btnStart').disabled = true;
+            document.getElementById('btnPause').disabled = true;
+            document.getElementById('btnComplete').disabled = true;
+            clearInterval(timerInterval);
+            const timerEl = document.getElementById('liveTimerDisplay');
+            if (timerEl) timerEl.innerHTML = `00:00:00 <span style="font-size: 0.8rem; color: #64748b;">(Hedef: 0 dk)</span>`;
+        }
+
+        function updateControlPanel() {
+            if (!selectedJob) {
+                resetControlPanel();
+                return;
+
+            }
+
+            document.getElementById('currentDocItem').innerText = `#${selectedJob.sap_doc_num} - ${selectedJob.item_code}`;
+            document.getElementById('currentItemDesc').innerText = selectedJob.item_description || '-';
+            document.getElementById('currentQty').innerText = `${selectedJob.completed_qty} / ${selectedJob.planned_qty} Adet`;
+            document.getElementById('currentNextStation').innerText = selectedJob.next_category_name;
+            document.getElementById('currentStatus').innerText = selectedJob.status;
+
+            const btnStart = document.getElementById('btnStart');
+            const btnPause = document.getElementById('btnPause');
+            const btnComplete = document.getElementById('btnComplete');
+
+            const isExecutable = selectedJob.is_unlocked && selectedJob.is_scheduled_today;
+            const isCompleted = selectedJob.status === 'COMPLETED';
+
+            if (!isExecutable || isCompleted) {
+                btnStart.disabled = true;
+                btnPause.disabled = true;
+                btnComplete.disabled = true;
+                return;
+            }
+
+            if (selectedJob.status === 'IN_PROGRESS') {
+                btnStart.disabled = true;
+                btnPause.disabled = false;
+                btnComplete.disabled = false;
+            } else if (selectedJob.status === 'PAUSED') {
+                btnStart.disabled = false;
+                btnPause.disabled = true;
+                btnComplete.disabled = false;
+            } else { // PENDING
+                btnStart.disabled = false;
+                btnPause.disabled = true;
+                btnComplete.disabled = true;
+            }
+
+            startLiveTimer();
+        }
+
+        async function handleStart() {
+            if (!selectedJob) return;
+            try {
+                const res = await fetch('/api/jobs/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ operation_id: selectedJob.id })
+                });
+                if (!res.ok) throw new Error('İş başlatılamadı.');
+                await loadQueue();
+            } catch (err) { alert(err.message); }
+        }
+
+        function openPauseModal() {
+            if (!selectedJob) return;
+            document.querySelectorAll('.btn-reason').forEach(btn => btn.classList.remove('selected'));
+            document.getElementById('customPauseReason').value = '';
+            document.getElementById('pauseModal').style.display = 'flex';
+        }
+
+        function closePauseModal() {
+            document.getElementById('pauseModal').style.display = 'none';
+        }
+
+        function selectReason(btnElement, reasonText) {
+            document.querySelectorAll('.btn-reason').forEach(btn => btn.classList.remove('selected'));
+            btnElement.classList.add('selected');
+
+            const input = document.getElementById('customPauseReason');
+            if (reasonText === 'Diğer') {
+                input.value = '';
+                input.focus();
+            } else {
+                input.value = reasonText;
+            }
+        }
+
+        async function confirmAndPause() {
+            if (!selectedJob) return;
+            const reason = document.getElementById('customPauseReason').value.trim();
+            if (!reason) {
+                alert('Lütfen bir duruş nedeni seçin veya açıklama girin!');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/jobs/pause', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({
+                        operation_id: selectedJob.id,
+                        operator_note: reason
+                    })
+                });
+                if (!res.ok) throw new Error('İş duraklatılamadı.');
+
+                closePauseModal();
+                await loadQueue();
+            } catch (err) {
+                alert(err.message);
+            }
+        }
+
+        function openCompleteModal() {
+            if (!selectedJob) return;
+            document.getElementById('modalTargetStation').innerText = selectedJob.next_category_name;
+            document.getElementById('confirmModal').style.display = 'flex';
+        }
+
+        function closeCompleteModal() {
+            document.getElementById('confirmModal').style.display = 'none';
+        }
+
+        async function confirmAndComplete() {
+            if (!selectedJob) return;
+            try {
+                const res = await fetch('/api/jobs/complete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({
+                        operation_id: selectedJob.id,
+                        completed_qty: selectedJob.planned_qty,
+                        scrapped_qty: 0,
+                        operator_note: 'İstasyon teslimatı yapıldı ve tamamlandı.'
+                    })
+                });
+
+                if (!res.ok) throw new Error('İş tamamlanamadı.');
+                closeCompleteModal();
+                selectedJob = null;
+                resetControlPanel();
+                await loadQueue();
+            } catch (err) {
+                alert(err.message);
+            }
+        }
+
+        function logout() {
+            localStorage.clear();
+            window.location.href = '/';
+        }
+
+        loadWorkstations();
+        loadQueue();
+
+        // Canlı Takip: Her 4 saniyede bir yeni gelen işleri sessizce çek
+        setInterval(() => {
+            // Operatör o an duruş veya tamamlama modalında işlem yapmıyorsa kuyruğu tazele
+            const pauseModalOpen = document.getElementById('pauseModal')?.style.display === 'flex';
+            const confirmModalOpen = document.getElementById('confirmModal')?.style.display === 'flex';
+
+            if (!pauseModalOpen && !confirmModalOpen) {
+                loadQueue();
+            }
+        }, 4000);
+    </script>
+</body>
+</html>
