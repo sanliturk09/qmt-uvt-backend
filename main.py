@@ -538,27 +538,118 @@ def get_job_queue(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+def _get_action_user_id(current_user: dict) -> int:
+    raw_id = current_user.get("user_id") or current_user.get("sub")
+    if not raw_id:
+        raise HTTPException(status_code=401, detail="Geçersiz kullanıcı oturumu.")
+    return int(raw_id)
+
+
+def _load_authorized_operation(cur, operation_id: int, current_user: dict):
+    """Operasyonu kilitleyerek fabrika ve operatör yetkisini doğrular."""
+    factory = current_user.get("factory")
+    role = current_user.get("role")
+    user_id = _get_action_user_id(current_user)
+
+    if not factory or role not in ["ADMIN", "PLANNER", "OPERATOR"]:
+        raise HTTPException(status_code=403, detail="Bu işlem için yetkiniz bulunmamaktadır.")
+
+    cur.execute("""
+        SELECT
+            op.sap_doc_entry,
+            op.stage_order,
+            op.status,
+            op.is_unlocked,
+            op.assigned_user_id,
+            op.assigned_workstation_id,
+            op.category_id,
+            sc.code
+        FROM dbo.ProductionOperations op WITH (UPDLOCK, HOLDLOCK)
+        INNER JOIN dbo.ProductionOrders po
+            ON op.sap_doc_entry = po.sap_doc_entry
+           AND po.sap_factory = ?
+        LEFT JOIN dbo.StationCategories sc ON op.category_id = sc.id
+        WHERE op.id = ?
+    """, (factory, operation_id))
+    op = cur.fetchone()
+
+    if not op:
+        raise HTTPException(status_code=404, detail="Operasyon bulunamadı.")
+
+    if role == "OPERATOR":
+        cur.execute("""
+            SELECT username
+            FROM dbo.Users
+            WHERE id = ? AND factory_location = ? AND is_active = 1
+        """, (user_id, factory))
+        user_row = cur.fetchone()
+        if not user_row:
+            raise HTTPException(status_code=403, detail="Kullanıcı hesabı aktif değil veya farklı fabrikaya ait.")
+
+        category_id = op[6]
+        cur.execute("""
+            SELECT 1
+            FROM dbo.UserCategories
+            WHERE user_id = ? AND category_id = ?
+        """, (user_id, category_id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=403, detail="Bu operasyon kullanıcının istasyon kategorisine ait değil.")
+
+        # Mevcut kuyruk davranışı KYN kullanıcılarını KYN-01, KYN-02 ...
+        # tezgah kodlarıyla eşleştiriyor. API işlemleri de aynı sınırı uygular.
+        category_code = (op[7] or "").upper()
+        if category_code == "KYN":
+            username = (user_row[0] or "").upper().replace(" ", "").replace("-", "")
+            number_part = "".join(filter(str.isdigit, username))
+            if not username.startswith("KYN") or not number_part:
+                raise HTTPException(status_code=403, detail="Kaynak tezgahı kullanıcıyla eşleştirilemedi.")
+
+            workstation_code = f"KYN-{int(number_part):02d}"
+            cur.execute("""
+                SELECT TOP 1 id
+                FROM dbo.Workstations
+                WHERE station_code = ? AND category_id = ? AND is_active = 1
+            """, (workstation_code, category_id))
+            workstation_row = cur.fetchone()
+            expected_workstation_id = workstation_row[0] if workstation_row else None
+            if expected_workstation_id is None or op[5] != expected_workstation_id:
+                raise HTTPException(status_code=403, detail="Bu operasyon farklı bir kaynak tezgahına atanmış.")
+
+        assigned_user_id = op[4]
+        if assigned_user_id is not None and int(assigned_user_id) != user_id:
+            raise HTTPException(status_code=403, detail="Bu operasyon başka bir kullanıcı tarafından yürütülüyor.")
+
+    return op
+
+
+def _resolve_action_user_id(cur, data: JobActionRequest, current_user: dict) -> int:
+    user_id = _get_action_user_id(current_user)
+    if data.target_user_id and current_user.get("role") in ["ADMIN", "PLANNER"]:
+        cur.execute("""
+            SELECT id
+            FROM dbo.Users
+            WHERE id = ? AND factory_location = ? AND is_active = 1
+        """, (data.target_user_id, current_user.get("factory")))
+        target_user = cur.fetchone()
+        if not target_user:
+            raise HTTPException(status_code=400, detail="Hedef kullanıcı aktif değil veya farklı fabrikaya ait.")
+        user_id = int(target_user[0])
+    return user_id
+
+
 @app.post("/api/jobs/start")
 def start_job(data: JobActionRequest, current_user: dict = Depends(get_current_user)):
-    raw_id = current_user.get("user_id") or current_user.get("sub")
-    user_id = int(raw_id) if raw_id else 0
-
-    if data.target_user_id and current_user.get("role") in ["ADMIN", "PLANNER"]:
-        user_id = data.target_user_id
-
     with get_db_cursor() as cur:
-        cur.execute("SELECT status, is_unlocked FROM dbo.ProductionOperations WHERE id = ?", (data.operation_id,))
-        op = cur.fetchone()
-        if not op:
-            raise HTTPException(status_code=404, detail="Operasyon bulunamadı.")
-
-        status_val, is_unlocked = op[0], bool(op[1])
+        op = _load_authorized_operation(cur, data.operation_id, current_user)
+        status_val, is_unlocked = op[2], bool(op[3])
 
         if not is_unlocked:
             raise HTTPException(status_code=400, detail="Bu operasyon henüz kilitli! Önceki operasyon tamamlanmalıdır.")
 
-        if status_val == "IN_PROGRESS":
-            raise HTTPException(status_code=400, detail="Bu operasyon zaten çalışıyor.")
+        if status_val not in ["PENDING", "PAUSED"]:
+            raise HTTPException(status_code=400, detail="Yalnızca bekleyen veya duraklatılmış operasyonlar başlatılabilir.")
+
+        user_id = _resolve_action_user_id(cur, data, current_user)
 
         cur.execute("""
             UPDATE dbo.ProductionOperations 
@@ -576,17 +667,12 @@ def start_job(data: JobActionRequest, current_user: dict = Depends(get_current_u
 
 @app.post("/api/jobs/pause")
 def pause_job(data: JobActionRequest, current_user: dict = Depends(get_current_user)):
-    raw_id = current_user.get("user_id") or current_user.get("sub")
-    user_id = int(raw_id) if raw_id else 0
-
-    if data.target_user_id and current_user.get("role") in ["ADMIN", "PLANNER"]:
-        user_id = data.target_user_id
-
     with get_db_cursor() as cur:
-        cur.execute("SELECT status FROM dbo.ProductionOperations WHERE id = ?", (data.operation_id,))
-        op = cur.fetchone()
-        if not op or op[0] != "IN_PROGRESS":
+        op = _load_authorized_operation(cur, data.operation_id, current_user)
+        if op[2] != "IN_PROGRESS":
             raise HTTPException(status_code=400, detail="Sadece devam eden işler duraklatılabilir.")
+
+        user_id = _resolve_action_user_id(cur, data, current_user)
 
         cur.execute("UPDATE dbo.ProductionOperations SET status = 'PAUSED' WHERE id = ?", (data.operation_id,))
 
@@ -610,23 +696,15 @@ def pause_job(data: JobActionRequest, current_user: dict = Depends(get_current_u
 
 @app.post("/api/jobs/complete")
 def complete_job(data: JobActionRequest, current_user: dict = Depends(get_current_user)):
-    raw_id = current_user.get("user_id") or current_user.get("sub")
-    user_id = int(raw_id) if raw_id else 0
-
-    if data.target_user_id and current_user.get("role") in ["ADMIN", "PLANNER"]:
-        user_id = data.target_user_id
-
     with get_db_cursor() as cur:
-        cur.execute("""
-            SELECT sap_doc_entry, stage_order, status 
-            FROM dbo.ProductionOperations 
-            WHERE id = ?
-        """, (data.operation_id,))
-        op = cur.fetchone()
-        if not op:
-            raise HTTPException(status_code=404, detail="Operasyon bulunamadı.")
-
+        # Satır kilidi aynı operasyonun iki eşzamanlı istek tarafından iki kez
+        # tamamlanmasını ve miktarın iki kez artırılmasını önler.
+        op = _load_authorized_operation(cur, data.operation_id, current_user)
         doc_entry, current_stage_order = op[0], op[1]
+        if op[2] != "IN_PROGRESS" or not bool(op[3]):
+            raise HTTPException(status_code=400, detail="Yalnızca devam eden ve kilidi açık operasyonlar tamamlanabilir.")
+
+        user_id = _resolve_action_user_id(cur, data, current_user)
 
         cur.execute("""
             UPDATE dbo.ProductionOperations 

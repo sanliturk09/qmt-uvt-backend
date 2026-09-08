@@ -1,11 +1,19 @@
+import os
+from pathlib import Path
+
 import bcrypt
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from dotenv import load_dotenv
 
 # Token Güvenlik Sabitleri
-SECRET_KEY = "QMT_UVT_SUPER_SECRET_KEY_2026!CHANGE_ME"
+load_dotenv(Path(__file__).resolve().parent / ".env")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY or len(SECRET_KEY) < 32:
+    raise RuntimeError("JWT_SECRET_KEY .env dosyasında en az 32 karakter olarak tanımlanmalıdır.")
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 Saatlik oturum
 
