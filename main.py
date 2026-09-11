@@ -13,6 +13,33 @@ from auth import verify_password, hash_password, create_access_token, get_curren
 
 app = FastAPI(title="UVT Üretim Takip API", version="1.0.0")
 
+
+def _format_display_date(value) -> Optional[str]:
+    if not value:
+        return None
+    if hasattr(value, "strftime"):
+        return value.strftime("%d-%m-%Y")
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).strftime("%d-%m-%Y")
+    except ValueError:
+        return str(value)
+
+
+def _overdue_days(scheduled_date_value) -> int:
+    """Number of calendar days an open operation is behind its planned date."""
+    if not scheduled_date_value:
+        return 0
+    if hasattr(scheduled_date_value, "date"):
+        planned_date = scheduled_date_value.date()
+    elif isinstance(scheduled_date_value, date):
+        planned_date = scheduled_date_value
+    else:
+        try:
+            planned_date = datetime.fromisoformat(str(scheduled_date_value)).date()
+        except ValueError:
+            return 0
+    return max(0, (date.today() - planned_date).days)
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -69,6 +96,10 @@ class CockpitOperationItem(BaseModel):
     progress_pct: Optional[float] = 0.0
     elapsed_work_seconds: float = 0.0
     is_overdue: bool = False
+    batch_details: List[str] = []
+    sales_order_doc_num: Optional[int] = None
+    customer_ref_no: Optional[str] = None
+    sales_delivery_date: Optional[str] = None
 
 class UserCreateRequest(BaseModel):
     username: str
@@ -123,6 +154,25 @@ class OperationResponse(BaseModel):
     assigned_workstation_id: Optional[int] = None
     planned_duration_min: float = 0.0
     elapsed_work_seconds: float = 0.0
+    batch_details: List[str] = []
+    sales_order_doc_num: Optional[int] = None
+    customer_ref_no: Optional[str] = None
+    sales_delivery_date: Optional[str] = None
+    overdue_days: int = 0
+
+
+class BatchSelectionInput(BaseModel):
+    material_code: str
+    batch_number: str
+
+
+class LzrBatchOption(BaseModel):
+    material_code: str
+    batch_number: str
+    available_quantity: float
+    warehouse: str
+    display_quantity: float
+    display_unit: str
 
 class JobActionRequest(BaseModel):
     operation_id: int
@@ -131,6 +181,7 @@ class JobActionRequest(BaseModel):
     operator_note: Optional[str] = None
     completed_qty: Optional[float] = 0.0
     scrapped_qty: Optional[float] = 0.0
+    batch_selections: List[BatchSelectionInput] = []
 
 class OfflineLogItem(BaseModel):
     operation_id: int
@@ -183,23 +234,28 @@ def get_shipping_orders(current_user: dict = Depends(get_current_user)):
                     po.item_description,
                     po.planned_qty,
                     po.plan_due_date,
-                    ISNULL(MAX(op.completed_qty), po.planned_qty) AS completed_qty
+                    ISNULL(MAX(op.completed_qty), po.planned_qty) AS completed_qty,
+                    po.sales_order_doc_num,
+                    po.customer_ref_no,
+                    po.sales_delivery_date
                 FROM dbo.ProductionOrders po
                 INNER JOIN dbo.ProductionOperations op ON po.sap_doc_entry = op.sap_doc_entry
                 WHERE po.sap_factory = ? 
                   AND (po.status IS NULL OR po.status != 'CLOSED')
                 GROUP BY 
                     po.sap_doc_entry, po.sap_doc_num, po.item_code, 
-                    po.item_description, po.planned_qty, po.plan_due_date
+                    po.item_description, po.planned_qty, po.plan_due_date,
+                    po.sales_order_doc_num, po.customer_ref_no, po.sales_delivery_date
                 HAVING 
                     COUNT(CASE WHEN op.status != 'COMPLETED' THEN 1 END) = 0
                 ORDER BY po.sap_doc_num DESC
             """, (factory,))
             rows = cur.fetchall()
+            batch_details_by_order = _get_batch_details_by_order(cur, [r[0] for r in rows])
 
             result = []
             for r in rows:
-                due_d = r[5].isoformat() if hasattr(r[5], 'isoformat') else (str(r[5]) if r[5] else None)
+                due_d = _format_display_date(r[5])
                 result.append({
                     "sap_doc_entry": r[0],
                     "sap_doc_num": r[1],
@@ -207,7 +263,11 @@ def get_shipping_orders(current_user: dict = Depends(get_current_user)):
                     "item_description": r[3],
                     "planned_qty": float(r[4] or 0),
                     "due_date": due_d,
-                    "completed_qty": float(r[6] or 0)
+                    "completed_qty": float(r[6] or 0),
+                    "batch_details": batch_details_by_order.get(int(r[0]), []),
+                    "sales_order_doc_num": r[7],
+                    "customer_ref_no": r[8],
+                    "sales_delivery_date": _format_display_date(r[9])
                 })
             return result
     except Exception as e:
@@ -344,6 +404,27 @@ def sync_jobs_from_sap(current_user: dict = Depends(require_role(["ADMIN", "PLAN
         """)
         synced_orders_count = cur.rowcount
 
+        # Store sales-order data in UVT so every operator and cockpit request
+        # can render it quickly.  This statement updates UVT_DB only; SAP B1
+        # tables are joined strictly for reading.
+        sap_database = os.getenv(f"SAP_{factory}_DB_NAME", "QMT_TR_TEST")
+        if not sap_database.replace("_", "").isalnum():
+            raise HTTPException(status_code=500, detail="SAP veritabanı adı geçersiz yapılandırılmış.")
+        cur.execute(f"""
+            UPDATE po
+            SET
+                sales_order_doc_num = so.DocNum,
+                customer_ref_no = NULLIF(LTRIM(RTRIM(so.NumAtCard)), ''),
+                sales_delivery_date = so.DocDueDate
+            FROM dbo.ProductionOrders po
+            INNER JOIN [{sap_database}].dbo.OWOR wo
+                ON wo.DocEntry = po.sap_doc_entry
+            LEFT JOIN [{sap_database}].dbo.ORDR so
+                ON so.DocEntry = TRY_CONVERT(INT, wo.OriginAbs)
+                OR so.DocNum = TRY_CONVERT(INT, wo.OriginNum)
+            WHERE po.sap_factory = ?
+        """, (factory,))
+
         # 2. Operasyonları sap_line_num Sırasına Göre (1, 2, 3, 4, 5...) ve MK-TMZ -> TMZ Eşleşmesiyle Al
         cur.execute(f"""
             WITH RankedOps AS (
@@ -396,6 +477,151 @@ def sync_jobs_from_sap(current_user: dict = Depends(require_role(["ADMIN", "PLAN
         "synced_operations_count": synced_ops_count if synced_ops_count >= 0 else 0
     }
 
+
+def _get_lzr_batch_options(cur, operation_id: int, current_user: dict) -> list[dict]:
+    """Reads live SAP B1 lots for material lines owned by one LZR stage.
+
+    SAP WOR1 contains both UVT station marker lines (e.g. MK-LZRSC) and the
+    actual stock material lines that follow them.  The stage owns the lines
+    between its marker and the next UVT station marker.  This is what keeps a
+    profile-cut LZR stage separate from a later sheet-cut LZR stage.
+    """
+    factory = current_user.get("factory", "TR")
+    cur.execute("""
+        SELECT op.resource_code, op.sap_doc_entry, op.sap_line_num, sc.code
+        FROM dbo.ProductionOperations op
+        INNER JOIN dbo.ProductionOrders po
+            ON po.sap_doc_entry = op.sap_doc_entry AND po.sap_factory = ?
+        LEFT JOIN dbo.StationCategories sc ON sc.id = op.category_id
+        WHERE op.id = ?
+    """, (factory, operation_id))
+    operation = cur.fetchone()
+    if not operation:
+        raise HTTPException(status_code=404, detail="Operasyon bulunamadı.")
+    if (operation[3] or "").upper() != "LZR":
+        raise HTTPException(status_code=400, detail="Parti seçimi yalnızca LZR operasyonları için kullanılabilir.")
+
+    sap_database = os.getenv(f"SAP_{factory}_DB_NAME", "QMT_TR_TEST")
+    if not sap_database.replace("_", "").isalnum():
+        raise HTTPException(status_code=500, detail="SAP veritabanı adı geçersiz yapılandırılmış.")
+
+    cur.execute("""
+        SELECT MIN(sap_line_num)
+        FROM dbo.ProductionOperations
+        WHERE sap_doc_entry = ? AND sap_line_num > ?
+    """, (operation[1], operation[2]))
+    next_marker_line = cur.fetchone()[0]
+
+    # MK-LZRSC is the sheet-cut marker.  SAP stores sheet stock in square
+    # metres; operators need to see the equivalent number of 4.5 m² sheets.
+    is_sheet_cut = "LZRSC" in str(operation[0] or "").upper()
+    sheet_area_m2 = float(os.getenv("LZR_SHEET_AREA_M2", "4.5"))
+    if sheet_area_m2 <= 0:
+        raise HTTPException(status_code=500, detail="LZR_SHEET_AREA_M2 sıfırdan büyük olmalıdır.")
+
+    # SAP B1 OIBT is read-only here. Quantity <= 0 batches are intentionally
+    # excluded so a depleted lot can never be presented to the operator.
+    cur.execute(f"""
+        SELECT wor1.ItemCode, oibt.BatchNum, oibt.Quantity, wor1.Warehouse
+        FROM [{sap_database}].dbo.WOR1 wor1
+        INNER JOIN [{sap_database}].dbo.OIBT oibt
+            ON oibt.ItemCode = wor1.ItemCode
+           AND oibt.WhsCode = wor1.Warehouse
+        WHERE wor1.DocEntry = ?
+          AND wor1.LineNum > ?
+          AND (? IS NULL OR wor1.LineNum < ?)
+          AND oibt.Quantity > 0
+        ORDER BY wor1.LineNum, oibt.BatchNum
+    """, (operation[1], operation[2], next_marker_line, next_marker_line))
+    options = []
+    for row in cur.fetchall():
+        available_quantity = float(row[2])
+        options.append({
+            "material_code": str(row[0]),
+            "batch_number": str(row[1]),
+            "available_quantity": available_quantity,
+            "warehouse": str(row[3]),
+            "display_quantity": round(available_quantity / sheet_area_m2, 2) if is_sheet_cut else available_quantity,
+            "display_unit": "Adet Sac" if is_sheet_cut else "Metre Profil",
+        })
+    return options
+
+
+def _get_batch_details_by_order(cur, sap_doc_entries: List[int]) -> dict[int, list[str]]:
+    """Loads LZR lot history for many orders in one query.
+
+    Cockpit polling can contain hundreds of operations.  This deliberately
+    avoids one extra database request per operation.
+    """
+    unique_entries = list({int(entry) for entry in sap_doc_entries})
+    if not unique_entries:
+        return {}
+    placeholders = ",".join("?" for _ in unique_entries)
+    cur.execute("""
+        SELECT op.sap_doc_entry, op.resource_code, bs.batch_number
+        FROM dbo.LzrBatchSelections bs
+        INNER JOIN dbo.ProductionOperations op ON op.id = bs.operation_id
+        WHERE op.sap_doc_entry IN (""" + placeholders + """)
+        ORDER BY op.stage_order, bs.id
+    """, tuple(unique_entries))
+    details: dict[int, list[str]] = {entry: [] for entry in unique_entries}
+    for row in cur.fetchall():
+        details[int(row[0])].append(f"{row[1]} - Chrgn Nr.: {row[2]}")
+    return details
+
+
+def _save_lzr_batch_selections(cur, operation_id: int, selections: List[BatchSelectionInput], user_id: int,
+                               current_user: dict) -> None:
+    # Deployments that ran the first migration need the follow-up migration
+    # before a no-quantity batch selection can be stored.  Return a clear API
+    # error instead of leaking a SQL integrity exception as HTTP 500.
+    cur.execute("""
+        SELECT is_nullable
+        FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.LzrBatchSelections')
+          AND name = 'selected_quantity'
+    """)
+    quantity_column = cur.fetchone()
+    if not quantity_column or not quantity_column[0]:
+        raise HTTPException(
+            status_code=503,
+            detail="LZR parti migration güncellemesi eksik. UVT_DB üzerinde 20260911_lzr_batch_selection_remove_quantity.sql dosyasını bir kez çalıştırın."
+        )
+
+    cur.execute("SELECT COUNT(*) FROM dbo.LzrBatchSelections WHERE operation_id = ?", (operation_id,))
+    if cur.fetchone()[0] > 0:
+        return
+    if not selections:
+        raise HTTPException(status_code=400, detail="LZR işi başlatılmadan önce en az bir parti seçilmelidir.")
+
+    options = _get_lzr_batch_options(cur, operation_id, current_user)
+    available = {(item["material_code"], item["batch_number"]): item["available_quantity"] for item in options}
+    requested: set[tuple[str, str]] = set()
+    for selection in selections:
+        material_code = selection.material_code.strip()
+        batch_number = selection.batch_number.strip()
+        if not material_code or not batch_number:
+            raise HTTPException(status_code=400, detail="Hammadde kodu ve parti numarası boş olamaz.")
+        requested.add((material_code, batch_number))
+
+    for material_code, batch_number in requested:
+        if (material_code, batch_number) not in available:
+            raise HTTPException(status_code=400, detail=f"{material_code} için '{batch_number}' partisi artık SAP stok listesinde bulunmuyor.")
+
+    for material_code, batch_number in requested:
+        cur.execute("""
+            INSERT INTO dbo.LzrBatchSelections
+                (operation_id, material_code, batch_number, selected_quantity, selected_by_user_id)
+            VALUES (?, ?, ?, ?, ?)
+        """, (operation_id, material_code, batch_number, None, user_id))
+
+
+@app.get("/api/jobs/{operation_id}/lzr-batches", response_model=List[LzrBatchOption])
+def get_lzr_batches(operation_id: int, current_user: dict = Depends(get_current_user)):
+    with get_db_cursor() as cur:
+        _load_authorized_operation(cur, operation_id, current_user)
+        return _get_lzr_batch_options(cur, operation_id, current_user)
+
 @app.get("/api/jobs/queue", response_model=List[OperationResponse])
 def get_job_queue(
         category_id: Optional[int] = None,
@@ -434,6 +660,7 @@ def get_job_queue(
                         op.category_id, po.sap_factory, op.assigned_workstation_id,
                         sc.code AS category_code,
                         ISNULL(op.planned_duration_min, 0.0) AS planned_duration_min,
+                        po.sales_order_doc_num, po.customer_ref_no, po.sales_delivery_date,
                         LEAD(op.category_name) OVER (PARTITION BY op.sap_doc_entry ORDER BY op.stage_order ASC) AS next_stage_name
                     FROM dbo.ProductionOperations op
                     INNER JOIN dbo.ProductionOrders po ON op.sap_doc_entry = po.sap_doc_entry
@@ -444,7 +671,8 @@ def get_job_queue(
                     o.item_description, o.category_name, o.stage_order, 
                     o.status, o.is_unlocked, o.scheduled_date, o.planned_qty, o.completed_qty, 
                     o.next_stage_name, o.assigned_workstation_id, o.planned_duration_min,
-                    ISNULL(oe.elapsed_sec, 0.0) AS elapsed_sec
+                    ISNULL(oe.elapsed_sec, 0.0) AS elapsed_sec,
+                    o.sales_order_doc_num, o.customer_ref_no, o.sales_delivery_date
                 FROM OpsWithNext o
                 LEFT JOIN OpElapsed oe ON o.id = oe.operation_id
                 WHERE o.sap_factory = ? 
@@ -506,10 +734,12 @@ def get_job_queue(
             """
             cur.execute(query, tuple(params))
             rows = cur.fetchall()
+            batch_details_by_order = _get_batch_details_by_order(cur, [r[1] for r in rows])
 
             result = []
             for r in rows:
                 sched_date = r[9].isoformat() if hasattr(r[9], 'isoformat') else (str(r[9]) if r[9] else None)
+                overdue_days = _overdue_days(r[9])
 
                 result.append({
                     "id": r[0],
@@ -528,7 +758,12 @@ def get_job_queue(
                     "completed_qty": float(r[11]),
                     "assigned_workstation_id": r[13],
                     "planned_duration_min": float(r[14]),
-                    "elapsed_work_seconds": float(r[15])
+                    "elapsed_work_seconds": float(r[15]),
+                    "batch_details": batch_details_by_order.get(int(r[1]), []),
+                    "sales_order_doc_num": r[16],
+                    "customer_ref_no": r[17],
+                    "sales_delivery_date": _format_display_date(r[18]),
+                    "overdue_days": overdue_days
                 })
 
             return result
@@ -650,6 +885,15 @@ def start_job(data: JobActionRequest, current_user: dict = Depends(get_current_u
             raise HTTPException(status_code=400, detail="Yalnızca bekleyen veya duraklatılmış operasyonlar başlatılabilir.")
 
         user_id = _resolve_action_user_id(cur, data, current_user)
+
+        # Each LZR component must be linked to the live SAP B1 lot(s) that
+        # the operator chose before it can begin.  The selections are stored
+        # only in UVT; SAP B1 is never updated from this application.
+        if (op[7] or "").upper() == "LZR":
+            _save_lzr_batch_selections(
+                cur, data.operation_id, data.batch_selections,
+                user_id, current_user
+            )
 
         cur.execute("""
             UPDATE dbo.ProductionOperations 
@@ -876,7 +1120,8 @@ def get_cockpit_operations(
                 ws.station_code AS workstation_code,
                 ISNULL(od.total_order_duration, 0.0) AS total_order_duration,
                 ISNULL(od.completed_order_duration, 0.0) AS completed_order_duration,
-                ISNULL(oe.elapsed_sec, 0.0) AS elapsed_sec
+                ISNULL(oe.elapsed_sec, 0.0) AS elapsed_sec,
+                po.sales_order_doc_num, po.customer_ref_no, po.sales_delivery_date
             FROM dbo.ProductionOperations op
             INNER JOIN dbo.ProductionOrders po ON op.sap_doc_entry = po.sap_doc_entry
             LEFT JOIN dbo.Workstations ws ON op.assigned_workstation_id = ws.id
@@ -904,6 +1149,7 @@ def get_cockpit_operations(
 
         cur.execute(query, tuple(params))
         rows = cur.fetchall()
+        batch_details_by_order = _get_batch_details_by_order(cur, [r[1] for r in rows])
 
         result = []
         for r in rows:
@@ -938,7 +1184,11 @@ def get_cockpit_operations(
                 "workstation_code": r[15],
                 "progress_pct": calculated_pct,
                 "elapsed_work_seconds": elapsed_sec,
-                "is_overdue": is_overdue
+                "is_overdue": is_overdue,
+                "batch_details": batch_details_by_order.get(int(r[1]), []),
+                "sales_order_doc_num": r[19],
+                "customer_ref_no": r[20],
+                "sales_delivery_date": _format_display_date(r[21])
             })
 
         return result

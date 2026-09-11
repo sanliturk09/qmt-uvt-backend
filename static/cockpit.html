@@ -368,6 +368,11 @@
             }
         }
 
+        function getSalesInfo(job) {
+            if (!job.sales_order_doc_num) return 'Fur BG';
+            return `Müşteri Ref: ${job.customer_ref_no || '-'} · Teslimat: ${job.sales_delivery_date || '-'}`;
+        }
+
         function createJobCard(job) {
             const card = document.createElement('div');
             card.className = 'cal-job-card';
@@ -384,14 +389,20 @@
 
             const pctTextColor = isOverdue ? '#ef4444' : '#10b981';
             const timeTextColor = isOverdue ? '#ef4444' : '#38bdf8';
+            const batchText = (job.batch_details || []).join('<br>');
+            const salesText = getSalesInfo(job);
 
             if (isOverdue) {
                 card.style.borderLeftColor = '#ef4444';
             }
 
             card.innerHTML = `
-                <div class="cal-job-doc">#${job.sap_doc_num} - ${job.item_code}</div>
+                <div style="display:flex; justify-content:space-between; gap:6px; align-items:flex-start;">
+                    <div class="cal-job-doc">#${job.sap_doc_num} - ${job.item_code}</div>
+                    <span style="font-size:0.62rem; color:#fbbf24; text-align:right; line-height:1.3;">${salesText}</span>
+                </div>
                 <div style="color:#94a3b8; font-size:0.7rem;">${job.category_name} (${job.planned_qty} Ad.)</div>
+                ${batchText ? `<div style="color:#38bdf8; font-size:0.66rem; margin-top:4px; line-height:1.35;">${batchText}</div>` : ''}
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span style="font-weight:700; color:${timeTextColor}; font-size:0.75rem;">
@@ -442,6 +453,7 @@
                     </div>
                     <div style="color:#38bdf8; font-weight:600; font-size:0.8rem;">${op.item_code}</div>
                     <div style="color:#94a3b8; font-size:0.75rem; margin-top:2px;">${op.category_name} - ${op.planned_qty} Adet (Aşama: ${op.stage_order})</div>
+                    <div style="color:#fbbf24; font-size:0.7rem; margin-top:4px;">${getSalesInfo(op)}</div>
                 `;
                 container.appendChild(card);
             });
@@ -567,7 +579,7 @@
 
             orders.forEach(ord => {
                 const row = document.createElement('div');
-                row.style = "display:grid; grid-template-columns: 40px 100px 2fr 1fr 1fr; align-items:center; background-color:#0f172a; border:1px solid #334155; border-radius:8px; padding:10px 14px; gap:10px;";
+                row.style = "display:grid; grid-template-columns: 40px 100px 2fr 1.4fr 1fr 1fr; align-items:center; background-color:#0f172a; border:1px solid #334155; border-radius:8px; padding:10px 14px; gap:10px;";
                 row.innerHTML = `
                     <div>
                         <input type="checkbox" class="shipping-checkbox" value="${ord.sap_doc_entry}" onchange="updateShippingSelectionCount()" style="width:18px; height:18px; cursor:pointer;">
@@ -577,11 +589,14 @@
                         <div style="font-weight:700; color:#38bdf8;">${ord.item_code}</div>
                         <div style="font-size:0.75rem; color:#94a3b8;">${ord.item_description || ''}</div>
                     </div>
+                    <div style="font-size:0.72rem; color:#38bdf8; line-height:1.4;">
+                        ${(ord.batch_details || []).join('<br>') || '<span style="color:#64748b;">Parti kaydı yok</span>'}
+                    </div>
                     <div style="font-weight:700; color:#10b981; font-size:0.85rem;">
                         ${ord.completed_qty} / ${ord.planned_qty} Adet
                     </div>
-                    <div style="text-align:right; font-size:0.75rem; color:#cbd5e1;">
-                        Termin: ${ord.due_date || 'Tarihsiz'}
+                    <div style="text-align:right; font-size:0.75rem; color:#fbbf24; line-height:1.4;">
+                        ${getSalesInfo(ord)}
                     </div>
                 `;
                 container.appendChild(row);

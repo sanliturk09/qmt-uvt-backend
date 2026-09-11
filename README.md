@@ -33,6 +33,7 @@ Process Management                     Windows Server NSSM (Non-Sucking Service 
 | `POST` | `/api/jobs/start` | Operator | Initializes a work session and creates a `START` telemetry log. |
 | `POST` | `/api/jobs/pause` | Operator | Freezes duration counter, writes stoppage reason to `PAUSE` log. |
 | `POST` | `/api/jobs/complete` | Operator | Finalizes stage, logs good/scrap quantities, triggers downstream routing. |
+| `GET` | `/api/jobs/{operation_id}/lzr-batches` | LZR operator | Reads the exact component's live, positive-quantity SAP B1 batch lots. |
 | `GET` | `/api/cockpit/operations` | Planner, Admin | Returns unified live scheduling board with progress calculations. |
 | `POST` | `/api/cockpit/schedule` | Planner, Admin | Updates operation assigned dates and workstations via drag-and-drop. |
 | `GET` | `/api/cockpit/workstations` | Public | Returns active workstations associated with a specific category. |
@@ -61,6 +62,17 @@ pip install -r requirements.txt
 
 4. Run Development Server
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+LZR Batch Traceability
+
+Before deploying the LZR batch-selection feature, execute
+`migrations/20260911_lzr_batch_selections.sql` once against `UVT_DB`. This
+creates an UVT-only audit table; it does not alter SAP Business One data.
+
+The SAP B1 company database is read through `SAP_TR_DB_NAME` (default:
+`QMT_TR_TEST`) or `SAP_DE_DB_NAME`. The LZR screen only lists `OIBT` batches
+with `Quantity > 0`, and every selected batch remains
+visible on downstream job cards and in the shipping list.
 
 
 

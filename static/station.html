@@ -339,12 +339,16 @@
                 <span id="currentNextStation" style="color:#38bdf8;">-</span>
             </div>
             <div class="summary-item">
-                <label>Durum</label>
-                <span id="currentStatus">-</span>
+                <label>Müşteri Ref / Teslimat</label>
+                <span id="currentSalesInfo" style="color:#38bdf8;">-</span>
             </div>
             <div class="summary-item">
                 <label>Durum</label>
                 <span id="currentStatus">-</span>
+            </div>
+            <div class="summary-item">
+                <label>Plan Durumu</label>
+                <span id="currentOverdueInfo">-</span>
             </div>
             <!-- CANLI SAYAÇ KUTUSU -->
             <div class="summary-item" style="border-left: 2px solid #334155; padding-left: 12px;">
@@ -406,6 +410,18 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="batchModal">
+        <div class="modal-box" style="max-width:620px;">
+            <div class="modal-title-confirm">LZR PARTİ SEÇİMİ</div>
+            <div class="modal-subtitle" id="batchModalSubtitle">Kesimde kullanılan SAP B1 parti numaralarını seçin.</div>
+            <div id="batchList" style="display:grid; gap:10px; margin:18px 0;"></div>
+            <div class="modal-buttons">
+                <button class="btn-modal-cancel" onclick="closeBatchModal()">Vazgeç</button>
+                <button class="btn-modal-confirm" onclick="confirmLzrBatches()">Partileri Onayla ve Başlat</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const token = localStorage.getItem('uvt_token');
         const storedUser = JSON.parse(localStorage.getItem('uvt_user') || '{}');
@@ -429,6 +445,7 @@
         let currentQueue = [];
         let selectedJob = null;
         let selectedWorkstationId = localStorage.getItem(`uvt_ws_${stationName}`) || '';
+        let pendingBatchSelections = [];
 
         let liveSeconds = 0;
     let timerInterval = null;
@@ -588,11 +605,19 @@
                     statusText = 'GÜNÜ GELMEDİ';
                 }
 
+                const batchText = (job.batch_details || []).map(escapeHtml).join('<br>');
+                const salesText = escapeHtml(getSalesInfo(job));
+                const overdueText = job.overdue_days > 0
+                    ? `<div style="font-size:0.72rem; color:#f87171; font-weight:800; margin-top:5px;">⚠ Planlamaya göre ${job.overdue_days} gün gecikti</div>`
+                    : '';
                 card.innerHTML = `
                     <div><strong>#${job.sap_doc_num}</strong></div>
                     <div>
                         <div style="font-weight:700; color:#f8fafc;">${job.item_code}</div>
                         <div style="font-size:0.8rem; color:#94a3b8;">${job.item_description || ''}</div>
+                        <div style="font-size:0.72rem; color:#fbbf24; margin-top:5px;">${salesText}</div>
+                        ${overdueText}
+                        ${batchText ? `<div style="font-size:0.72rem; color:#38bdf8; margin-top:5px;">${batchText}</div>` : ''}
                     </div>
                     <div>
                         <div style="font-size:0.75rem; color:#94a3b8;">Sonraki İstasyon:</div>
@@ -620,6 +645,23 @@
             }
         }
 
+        function escapeHtml(value) {
+            const div = document.createElement('div');
+            div.innerText = value || '';
+            return div.innerHTML;
+        }
+
+        function getSalesInfo(job) {
+            if (!job.sales_order_doc_num) return 'Fur BG';
+            return `Müşteri Ref: ${job.customer_ref_no || '-'} · Teslimat: ${job.sales_delivery_date || '-'}`;
+        }
+
+        function getOverdueInfo(job) {
+            return job.overdue_days > 0
+                ? `⚠ Planlamaya göre ${job.overdue_days} gün gecikti`
+                : 'Plan tarihine uygun';
+        }
+
         function selectJob(job) {
             selectedJob = job;
             updateControlPanel();
@@ -638,6 +680,8 @@
             document.getElementById('currentQty').innerText = '-';
             document.getElementById('currentNextStation').innerText = '-';
             document.getElementById('currentStatus').innerText = '-';
+            document.getElementById('currentSalesInfo').innerText = '-';
+            document.getElementById('currentOverdueInfo').innerText = '-';
 
             document.getElementById('btnStart').disabled = true;
             document.getElementById('btnPause').disabled = true;
@@ -659,6 +703,10 @@
             document.getElementById('currentQty').innerText = `${selectedJob.completed_qty} / ${selectedJob.planned_qty} Adet`;
             document.getElementById('currentNextStation').innerText = selectedJob.next_category_name;
             document.getElementById('currentStatus').innerText = selectedJob.status;
+            document.getElementById('currentSalesInfo').innerText = getSalesInfo(selectedJob);
+            const overdueInfo = document.getElementById('currentOverdueInfo');
+            overdueInfo.innerText = getOverdueInfo(selectedJob);
+            overdueInfo.style.color = selectedJob.overdue_days > 0 ? '#f87171' : '#10b981';
 
             const btnStart = document.getElementById('btnStart');
             const btnPause = document.getElementById('btnPause');
@@ -693,15 +741,72 @@
 
         async function handleStart() {
             if (!selectedJob) return;
+            if (stationName.toUpperCase() === 'LZR' && selectedJob.status === 'PENDING') {
+                await openLzrBatchModal();
+                return;
+            }
+            await startJob([]);
+        }
+
+        async function startJob(batchSelections) {
             try {
                 const res = await fetch('/api/jobs/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify({ operation_id: selectedJob.id })
+                    body: JSON.stringify({ operation_id: selectedJob.id, batch_selections: batchSelections })
                 });
-                if (!res.ok) throw new Error('İş başlatılamadı.');
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'İş başlatılamadı.');
                 await loadQueue();
             } catch (err) { alert(err.message); }
+        }
+
+        async function openLzrBatchModal() {
+            const list = document.getElementById('batchList');
+            list.innerHTML = '<div style="color:#94a3b8; text-align:center; padding:16px;">SAP B1 anlık parti stokları yükleniyor...</div>';
+            document.getElementById('batchModal').style.display = 'flex';
+            try {
+                const res = await fetch(`/api/jobs/${selectedJob.id}/lzr-batches`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const options = await res.json();
+                if (!res.ok) throw new Error(options.detail || 'Parti stokları alınamadı.');
+                pendingBatchSelections = options;
+                if (!options.length) {
+                    list.innerHTML = '<div style="color:#f87171; text-align:center; padding:16px;">Bu hammadde için SAP B1’de stokta parti bulunmuyor. İş başlatılamaz.</div>';
+                    return;
+                }
+                list.innerHTML = options.map((batch, index) => `
+                    <label style="display:grid; grid-template-columns:24px 1fr; gap:10px; align-items:center; padding:12px; border:1px solid #334155; border-radius:8px; background:#0f172a;">
+                        <input class="batch-check" type="checkbox" data-index="${index}" style="width:18px; height:18px;">
+                        <span><strong style="color:#f8fafc;">${escapeHtml(batch.material_code)}</strong><br><strong style="color:#38bdf8;">Chrgn Nr.: ${escapeHtml(batch.batch_number)}</strong><br><small style="color:#94a3b8;">Depo: ${escapeHtml(batch.warehouse)} · Kalan: ${batch.display_quantity} ${escapeHtml(batch.display_unit)}</small></span>
+                    </label>
+                `).join('');
+            } catch (err) {
+                list.innerHTML = `<div style="color:#f87171; text-align:center; padding:16px;">${escapeHtml(err.message)}</div>`;
+            }
+        }
+
+        function closeBatchModal() {
+            document.getElementById('batchModal').style.display = 'none';
+            pendingBatchSelections = [];
+        }
+
+        async function confirmLzrBatches() {
+            const selections = [];
+            document.querySelectorAll('.batch-check:checked').forEach(check => {
+                const index = Number(check.dataset.index);
+                selections.push({
+                    material_code: pendingBatchSelections[index].material_code,
+                    batch_number: pendingBatchSelections[index].batch_number
+                });
+            });
+            if (!selections.length) {
+                alert('En az bir parti seçmelisiniz.');
+                return;
+            }
+            closeBatchModal();
+            await startJob(selections);
         }
 
         function openPauseModal() {
@@ -801,8 +906,9 @@
             // Operatör o an duruş veya tamamlama modalında işlem yapmıyorsa kuyruğu tazele
             const pauseModalOpen = document.getElementById('pauseModal')?.style.display === 'flex';
             const confirmModalOpen = document.getElementById('confirmModal')?.style.display === 'flex';
+            const batchModalOpen = document.getElementById('batchModal')?.style.display === 'flex';
 
-            if (!pauseModalOpen && !confirmModalOpen) {
+            if (!pauseModalOpen && !confirmModalOpen && !batchModalOpen) {
                 loadQueue();
             }
         }, 4000);
